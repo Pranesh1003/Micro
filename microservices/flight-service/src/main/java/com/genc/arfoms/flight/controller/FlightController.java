@@ -19,8 +19,6 @@ import java.util.stream.Stream;
 
 @RestController
 @RequestMapping("/api/flights")
-// Corrected to allow global cross-origin access safely alongside permitted endpoints
-@CrossOrigin(origins = "*", allowedHeaders = "*")
 public class FlightController {
 
     private final FlightService flightService;
