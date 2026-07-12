@@ -30,6 +30,11 @@ public class SecurityConfig {
                 .csrf(CsrfConfigurer::disable)
                 .authorizeHttpRequests(requests ->
                         requests.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                                .requestMatchers("/flights/**").permitAll()
+                                .requestMatchers("/api/bookings/**").permitAll()
+                                .requestMatchers("/airline/api/seats/**").permitAll()
+                                .requestMatchers("/api/payment/**").permitAll()
+                                .requestMatchers("/booking/confirm/**").permitAll()
                                 .requestMatchers("/error").permitAll()
                                 .anyRequest().authenticated()
                 )

@@ -71,6 +71,38 @@ public class BookingController {
         return bookingService.createBooking(booking);
     }
 
+    @PostMapping("/api/bookings")
+    public ResponseEntity<Booking> createBookingFromPayload(@RequestBody Map<String, Object> payload) {
+        log.info("POST /api/bookings - payload={}", payload);
+        Booking booking = new Booking();
+        
+        Object flightIdVal = payload.get("flightId");
+        if (flightIdVal != null) {
+            booking.setFlightId(Long.valueOf(flightIdVal.toString()));
+        }
+        
+        String seatNumber = (String) payload.get("seatNumber");
+        booking.setSeat(seatNumber);
+        
+        Object fareVal = payload.get("fareAmount");
+        if (fareVal != null) {
+            booking.setFare(Double.parseDouble(fareVal.toString()));
+        }
+        
+        String passengerName = (String) payload.get("passengerName");
+        Passenger passenger = new Passenger();
+        passenger.setFullName(passengerName != null ? passengerName : "Unknown");
+        passenger.setEmail(passengerName != null ? (passengerName.toLowerCase().replaceAll("\\s+", "") + "@example.com") : "passenger@example.com");
+        passenger.setPhone("9876543210");
+        passenger.setAge(30);
+        passenger.setGender("Male");
+        
+        booking.setPassengerDetails(List.of(passenger));
+        
+        Booking saved = bookingService.createBooking(booking);
+        return ResponseEntity.status(HttpStatus.CREATED).body(saved);
+    }
+
     /** Fetch a single booking by id for the confirmation page. */
     @GetMapping("/api/bookings/confirmation/{bookingId}")
     public Booking getConfirmation(@PathVariable Long bookingId) {

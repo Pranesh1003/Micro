@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="2e0dbb72-1df4-43e9-88d9-688203b7165b" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/microservices/booking-service/src/main/java/com/genc/arfoms/booking/config/SecurityConfig.java" beforeDir="false" afterPath="$PROJECT_DIR$/microservices/booking-service/src/main/java/com/genc/arfoms/booking/config/SecurityConfig.java" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="FileTemplateManagerImpl">
+    <option name="RECENT_TEMPLATES">
+      <list>
+        <option value="HTML File" />
+      </list>
+    </option>
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="ProjectColorInfo"><![CDATA[{
+  "customColor": "",
+  "associatedIndex": 7
+}]]></component>
+  <component name="ProjectId" id="3GMEa2R5IGcCgPlLNb22nEHbUYo" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "Application.ApiGatewayApplication.executor": "Run",
+    "Application.AuthApplication.executor": "Run",
+    "Application.BookingServiceApplication.executor": "Run",
+    "Application.CheckinServiceApplication.executor": "Run",
+    "Application.ConfigServerApplication.executor": "Run",
+    "Application.CrewServiceApplication.executor": "Run",
+    "Application.DiscoveryServerApplication.executor": "Run",
+    "Application.FlightServiceApplication.executor": "Run",
+    "Application.LoyaltyServiceApplication.executor": "Run",
+    "DefaultHtmlFileTemplate": "HTML File",
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "git-widget-placeholder": "main",
+    "settings.editor.selected.configurable": "preferences.pluginManager"
+  }
+}]]></component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="2e0dbb72-1df4-43e9-88d9-688203b7165b" name="Changes" comment="" />
+      <created>1783773100506</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1783773100506</updated>
+    </task>
+    <servers />
+  </component>
+</project>
