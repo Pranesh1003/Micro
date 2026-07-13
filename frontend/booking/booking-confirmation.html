@@ -1,6 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <script>
+        window.apiFetch = window.apiFetch || window.fetch;
+    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Booking Confirmation | Airway Portal</title>
@@ -250,6 +253,6 @@
 
     document.addEventListener("DOMContentLoaded", loadBooking);
 </script>
-<script src="../arfoms-header.js" data-title="Booking Confirmation"></script>
+<script src="../arfoms-header.js?v=2" data-title="Booking Confirmation"></script>
 </body>
 </html>

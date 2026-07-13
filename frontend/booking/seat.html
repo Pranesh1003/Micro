@@ -1,6 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
 	<head>
+		<script>
+			window.apiFetch = window.apiFetch || window.fetch;
+		</script>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<title>Seat Availability &amp; Selection</title>
@@ -31,6 +34,38 @@
 				color: var(--text-primary);
 			}
 
+			/* Top Navigation Bar Styling */
+			.top-nav {
+				position: fixed; top: 0; left: 0; right: 0; width: 100%; height: 80px;
+				z-index: 1030; display: flex; align-items: center;
+				background: linear-gradient(90deg, #020617 0%, #0b1f5e 55%, #1d4ed8 100%);
+				box-shadow: 0 10px 28px rgba(2,6,23,.22);
+			}
+			.top-nav-inner {
+				position: relative; width: 100%; height: 100%; padding: 0 28px;
+				display: flex; align-items: center; justify-content: space-between; gap: 20px;
+			}
+			.nav-left, .nav-right { display: flex; align-items: center; flex: 1 1 0; min-width: 0; }
+			.nav-left  { justify-content: flex-start; }
+			.nav-right { justify-content: flex-end; }
+			.nav-title {
+				position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+				color: #fff; font-size: 1.6rem; font-weight: 800; letter-spacing: .02em;
+				white-space: nowrap; pointer-events: none;
+			}
+			.nav-icon {
+				width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center;
+				background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.14);
+				color: #fff; font-size: 1.2rem; flex-shrink: 0;
+			}
+			.nav-pill {
+				display: flex; align-items: center; gap: 10px; padding: .55rem .9rem;
+				border-radius: 999px; border: 1px solid rgba(255,255,255,.24);
+				background: rgba(255,255,255,.08); color: #fff; backdrop-filter: blur(8px);
+				white-space: nowrap; flex-shrink: 0;
+			}
+			.nav-pill-brand { font-weight: 800; letter-spacing: .03em; }
+
 			.page-header {
 				background: linear-gradient(135deg, var(--neutral-dark) 0%, var(--primary-mid) 100%);
 				color: #fff;
@@ -53,7 +88,7 @@
 
 			.info-panel {
 				position: sticky;
-				top: 24px;
+				top: 104px;
 			}
 
 			.detail-grid {
@@ -120,6 +155,14 @@
 				width: 26px;
 				text-align: center;
 				font-weight: 600;
+				font-size: 12px;
+				color: var(--text-secondary);
+			}
+			.cabin-col-label {
+				width: 52px;
+				min-width: 52px;
+				text-align: center;
+				font-weight: 700;
 				font-size: 12px;
 				color: var(--text-secondary);
 			}
@@ -431,15 +474,15 @@
 									<div class="summary-stack">
 										<div class="summary-card">
 											<p class="mb-1 text-muted">Base Fare</p>
-											<h6 class="mb-0" id="baseFareLabel">â‚¹18,500</h6>
+											<h6 class="mb-0" id="baseFareLabel">&#8377;18,500</h6>
 										</div>
 										<div class="summary-card">
 											<p class="mb-1 text-muted">Seat Charge</p>
-											<h6 class="mb-0" id="fareSeatCharge">â‚¹0</h6>
+											<h6 class="mb-0" id="fareSeatCharge">&#8377;0</h6>
 										</div>
 										<div class="summary-card highlight">
 											<p class="mb-1 text-muted">Total Amount</p>
-											<h6 class="mb-0" id="fareTotal">â‚¹18,500</h6>
+											<h6 class="mb-0" id="fareTotal">&#8377;18,500</h6>
 										</div>
 									</div>
 								</div>
@@ -470,8 +513,8 @@
 										</div>
 									</div>
 									<div class="seat-pricing">
-										<span>Window Seats (first &amp; last column): â‚¹700</span>
-										<span>Aisle / middle seats: â‚¹500</span>
+										<span>Window Seats (first &amp; last column): &#8377;700</span>
+										<span>Aisle / middle seats: &#8377;500</span>
 									</div>
 								</div>
 							</div>
@@ -510,6 +553,7 @@
 		</main>
 
 		<script>
+			window.apiFetch = window.apiFetch || window.fetch;
 			// Seat layout is driven by the flight's declared rows & columns.
 			// Window seats (first & last column of a row) are premium; the rest are aisle.
 			let cabinColumns = 0;
@@ -569,13 +613,13 @@
 			function init() {
 				renderSummary();
 				// Base fare in the sidebar reflects the chosen flight type & passenger count
-				document.getElementById('baseFareLabel').textContent = 'â‚¹' + baseFareTotal.toLocaleString();
-				document.getElementById('fareTotal').textContent = 'â‚¹' + baseFareTotal.toLocaleString();
+				document.getElementById('baseFareLabel').textContent = '\u20B9' + baseFareTotal.toLocaleString();
+				document.getElementById('fareTotal').textContent = '\u20B9' + baseFareTotal.toLocaleString();
 				loadSeatData();
 			}
 
 			function renderSummary() {
-				const route = (draft.fromLocation || 'Origin') + ' â†’ ' + (draft.toLocation || 'Destination');
+				const route = (draft.fromLocation || 'Origin') + ' \u2192 ' + (draft.toLocation || 'Destination');
 				document.getElementById('routeBadge').textContent = route;
 				document.getElementById('flightRoute').textContent = route;
 				document.getElementById('flightNumber').textContent = draft.flightNumber || draft.airline || '-';
@@ -592,7 +636,8 @@
 			// (e.g. no seat inventory seeded for this flight) fall back to a generated map
 			// so the seat-selection step always works.
 			function loadSeatData() {
-				apiFetch('http://localhost:8210/airline/api/seats?flightId=' + encodeURIComponent(flightId))
+				const fetchFn = window.apiFetch || window.fetch;
+				fetchFn('http://localhost:8210/airline/api/seats?flightId=' + encodeURIComponent(flightId))
 					.then((res) => (res.ok ? res.json() : Promise.reject()))
 					.then((data) => {
 						bookedSeats = (data && data.bookedSeatNumbers) || [];
@@ -625,6 +670,10 @@
 				return seats;
 			}
 
+			function colLetter(index) {
+				return String.fromCharCode(65 + (index - 1));
+			}
+
 			function renderSeats(seats) {
 				const grid = document.getElementById('seatGrid');
 				grid.innerHTML = '';
@@ -641,7 +690,8 @@
 					(seat.row != null && seat.row !== '') ? ('R' + seat.row) : seatRowLabel(seat.seatNumber);
 				const rowOrder = (seat) =>
 					(seat.row != null && seat.row !== '') ? Number(seat.row) : seatRowLabel(seat.seatNumber);
-				const rowDisplay = (seat) => seat.rowLetter || seatRowLabel(seat.seatNumber);
+				const rowDisplay = (seat) =>
+					(seat.row != null && seat.row !== '') ? seat.row : seatRowLabel(seat.seatNumber);
 
 				// Group seats by their row.
 				const rowsMap = new Map();
@@ -664,6 +714,39 @@
 				cabinColumns = rowKeys.reduce((max, k) => Math.max(max, rowsMap.get(k).length), 0);
 
 				grid.className = 'seat-cabin-rows';
+
+				// Render column headers row first
+				if (rowKeys.length > 0) {
+					const firstRowSeats = rowsMap.get(rowKeys[0]);
+					const colCount = firstRowSeats.length;
+					const aisleAfter = (cabinAisleAfter >= 1 && cabinAisleAfter < colCount)
+						? cabinAisleAfter
+						: Math.ceil(colCount / 2);
+
+					const headerEl = document.createElement('div');
+					headerEl.className = 'cabin-row mb-2';
+
+					// Spacer for left row label column
+					const spacer = document.createElement('span');
+					spacer.className = 'cabin-row-label';
+					spacer.textContent = '';
+					headerEl.appendChild(spacer);
+
+					for (let i = 0; i < colCount; i++) {
+						const colHeader = document.createElement('span');
+						colHeader.className = 'cabin-col-label fw-bold text-secondary';
+						colHeader.textContent = colLetter(i + 1);
+						headerEl.appendChild(colHeader);
+
+						if (i === aisleAfter - 1 && i < colCount - 1) {
+							const aisleSpacer = document.createElement('span');
+							aisleSpacer.className = 'cabin-aisle';
+							headerEl.appendChild(aisleSpacer);
+						}
+					}
+					grid.appendChild(headerEl);
+				}
+
 				rowKeys.forEach((key) => {
 					// Sort seats within the row by their column number when available,
 					// otherwise keep their natural order.
@@ -692,13 +775,14 @@
 						btn.className = 'seat-btn';
 						btn.dataset.seat = seat.seatNumber;
 						btn.dataset.col = col;
-						btn.textContent = seat.seatNumber;
 
 						if (seat.booked) {
 							btn.disabled = true;
 							btn.classList.add('seat-booked');
+							btn.textContent = seat.seatNumber;
 						} else {
 							btn.classList.add(seatType(col) === 'Window' ? 'seat-window' : 'seat-aisle');
+							btn.innerHTML = `${seat.seatNumber}<br><span style="font-size: 9px; font-weight: normal; opacity: 0.85; display: block; margin-top: 2px;">₹${seatPrice(col)}</span>`;
 							btn.addEventListener('click', () => selectSeat(btn, seat.seatNumber, col));
 						}
 						rowEl.appendChild(btn);
@@ -738,8 +822,8 @@
 				if (!selectedSeats || selectedSeats.length === 0) {
 					document.getElementById('infoNoSeat').style.display = 'block';
 					document.getElementById('infoGrid').style.display = 'none';
-					document.getElementById('fareSeatCharge').textContent = 'â‚¹0';
-					document.getElementById('fareTotal').textContent = 'â‚¹' + baseFareTotal.toLocaleString();
+					document.getElementById('fareSeatCharge').textContent = '\u20B90';
+					document.getElementById('fareTotal').textContent = '\u20B9' + baseFareTotal.toLocaleString();
 					return;
 				}
 
@@ -753,14 +837,19 @@
 					return sum + seatPrice(c);
 				}, 0);
 
+				const breakdown = selectedSeats.map(s => {
+					const c = selectedSeatCols[s] || seatColumn(s);
+					return `${s} (₹${seatPrice(c)})`;
+				}).join(' + ');
+
 				document.getElementById('infoSeatNumber').textContent = selectedSeats.join(', ');
 				document.getElementById('infoSeatType').textContent = `${selectedSeats.length} selected (${firstType} shown)`;
-				document.getElementById('infoSeatCost').textContent = totalSeatCharge > 0 ? 'â‚¹' + totalSeatCharge : '-';
+				document.getElementById('infoSeatCost').textContent = totalSeatCharge > 0 ? `${breakdown} = ₹${totalSeatCharge.toLocaleString()}` : '-';
 				document.getElementById('infoNoSeat').style.display = 'none';
 				document.getElementById('infoGrid').style.display = 'grid';
 
-				document.getElementById('fareSeatCharge').textContent = 'â‚¹' + totalSeatCharge.toLocaleString();
-				document.getElementById('fareTotal').textContent = 'â‚¹' + (baseFareTotal + totalSeatCharge).toLocaleString();
+				document.getElementById('fareSeatCharge').textContent = '\u20B9' + totalSeatCharge.toLocaleString();
+				document.getElementById('fareTotal').textContent = '\u20B9' + (baseFareTotal + totalSeatCharge).toLocaleString();
 			}
 
 			document.getElementById('confirmSeatBtn').addEventListener('click', () => {
@@ -789,15 +878,15 @@
 				document.querySelectorAll('.seat-btn.seat-selected').forEach((s) => {
 					s.classList.remove('seat-selected');
 				});
-				selectedSeat = '';
-				selectedSeatCol = 0;
+				selectedSeats = [];
+				selectedSeatCols = {};
 				document.getElementById('infoNoSeat').style.display = 'block';
 				document.getElementById('infoGrid').style.display = 'none';
-				document.getElementById('fareSeatCharge').textContent = 'â‚¹0';
-				document.getElementById('fareTotal').textContent = 'â‚¹' + baseFareTotal.toLocaleString();
+				document.getElementById('fareSeatCharge').textContent = '\u20B90';
+				document.getElementById('fareTotal').textContent = '\u20B9' + baseFareTotal.toLocaleString();
 			});
 		</script>
-	    <script src="../arfoms-header.js" data-title="Seat Selection"></script>
-    <script src="../js/auth.js"></script>
+	    <script src="../arfoms-header.js?v=2" data-title="Seat Selection"></script>
+    <script src="../js/auth.js?v=2"></script>
 </body>
 </html>

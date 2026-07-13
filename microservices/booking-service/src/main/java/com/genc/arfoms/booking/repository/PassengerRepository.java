@@ -12,7 +12,7 @@ import java.util.Optional;
 @Repository
 public interface PassengerRepository extends JpaRepository<Passenger, Long> {
 
-    Optional<Passenger> findByEmailIgnoreCase(String email);
+    List<Passenger> findByEmailIgnoreCase(String email);
 
     @Query("SELECT p FROM Passenger p WHERE p.booking.flightId = :flightId AND " +
            "(p.id = :passengerId OR (p.email IS NOT NULL AND LOWER(p.email) = LOWER(:email)))")

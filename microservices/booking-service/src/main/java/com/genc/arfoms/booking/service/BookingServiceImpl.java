@@ -195,6 +195,15 @@ public class BookingServiceImpl implements BookingService {
 
         Flight resolvedFlight = resolveFlightReference(bookingToSave);
         bookingToSave.setFlight(resolvedFlight);
+        bookingToSave.setFromLocation(resolvedFlight.getOrigin());
+        bookingToSave.setToLocation(resolvedFlight.getDestination());
+        bookingToSave.setAirline(resolvedFlight.getAirlineName());
+        bookingToSave.setFlightType(isInternationalFlight(resolvedFlight) ? "international" : "domestic");
+        if (resolvedFlight.getDepartureTime() != null && !resolvedFlight.getDepartureTime().isBlank()) {
+            String depDate = resolvedFlight.getDepartureTime().trim().split(" ")[0].split("T")[0];
+            bookingToSave.setDepartureDate(depDate);
+            bookingToSave.setFlyDate(depDate);
+        }
 
         int passengerCount = clampPassengers(bookingToSave.getPassengers());
         bookingToSave.setPassengers(passengerCount);
@@ -304,7 +313,8 @@ public class BookingServiceImpl implements BookingService {
                 existing = passengerRepository.findById(p.getId()).orElse(null);
             }
             if (existing == null && p.getEmail() != null && !p.getEmail().isBlank()) {
-                existing = passengerRepository.findByEmailIgnoreCase(p.getEmail().trim()).orElse(null);
+                List<Passenger> matches = passengerRepository.findByEmailIgnoreCase(p.getEmail().trim());
+                existing = matches.isEmpty() ? null : matches.get(0);
             }
             if (existing != null) {
                 if (p.getFullName() != null && !p.getFullName().isBlank()) existing.setFullName(p.getFullName());
