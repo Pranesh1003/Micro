@@ -1,0 +1,685 @@
+CODE LINE-BY-LINE EXPLANATION: REQUESTED ARFOMS MICROSERVICES
+==============================================================
+
+How to read this file
+---------------------
+Every entry below starts with an exact source file and source-line number(s).
+Where Java uses a multi-line statement or a block of purely structural lines
+(braces, imports, getters/setters), the adjacent lines are explained together;
+the explanation still accounts for every meaningful code line. Blank lines only
+separate code sections and have no runtime effect. `api-service` in the request
+is the `api-gateway` module in this repository.
+
+================================================================
+1. CONFIG SERVER: config-server
+================================================================
+
+File: config-server/src/main/java/com/genc/arfoms/configserver/ConfigServerApplication.java
+  Lines 1-5: Declare the Java package and import Spring Boot, Config Server and
+  discovery annotations. Imports give the class access to these framework APIs.
+  Line 7: `@SpringBootApplication` enables component scanning, auto-configuration
+  and Spring Boot configuration for this executable application.
+  Line 8: `@EnableConfigServer` changes the application into a server that
+  returns configuration to clients such as Flight Service.
+  Line 9: `@EnableDiscoveryClient` makes this application eligible to register
+  itself in Eureka.
+  Line 10: Starts the public `ConfigServerApplication` class definition.
+  Line 11: Starts the standard Java application entry-point method.
+  Line 12: `SpringApplication.run` creates Spring's ApplicationContext, starts
+  the embedded HTTP server and passes command-line arguments to Spring Boot.
+  Line 13: Closes the method and class; it has no independent behavior.
+
+File: config-server/src/main/resources/application.yml
+  Line 1: Begins the `server` YAML section.
+  Line 2: `port: 8888` exposes Config Server on TCP port 8888.
+  Line 4: Begins Spring's YAML section.
+  Lines 5-6: Assign the logical application name `config-server`.
+  Lines 7-8: Select Config Server's `native` profile, which reads local files
+  rather than a Git repository or remote configuration provider.
+  Lines 9-13: Configure Spring Cloud Config's native backend to search the
+  packaged `classpath:/config/` folder for files named after client services.
+  Lines 15-16: Point this service's Eureka client at the Eureka endpoint. It
+  will register only after discovery-server becomes available.
+
+File: config-server/pom.xml
+  Lines 1-5: XML declaration/project metadata and parent relationship. The
+  parent supplies common versions, Java release, Maven plugins and Config client.
+  Line 9: Sets this module's Maven artifact name to `config-server`.
+  Lines 11-24: Dependency block. `spring-cloud-config-server` implements Config
+  Server; `spring-boot-starter-web` provides HTTP endpoints; Eureka client lets
+  this server register in the service registry.
+  Lines 26-33: Configure the Spring Boot Maven plugin so Maven can repackage
+  this module as a runnable executable JAR.
+
+File: config-server/src/main/resources/config/discovery-server.properties
+  Line 1: Gives Eureka Server port 8761.
+  Lines 3-5: Stops the standalone registry from registering with or fetching
+  registry data from itself; hostname is fixed to localhost for development.
+  Lines 7-8: Disable self-preservation and run eviction every 15 seconds. This
+  makes stale instances disappear quickly in local development.
+
+File: config-server/src/main/resources/config/auth-service.properties
+  Line 1: Sets Auth Service port 8180.
+  Lines 4-6: Configure Auth Service's Eureka address and local hostname identity.
+  Lines 10-16: Configure MySQL connection, database account, JDBC driver and
+  JPA Hibernate behavior. `ddl-auto=update` evolves tables from entity classes.
+  Lines 18-22: Provide default administrator property values. Note that the
+  inspected `DataInitializer` has its own explicit default-user values.
+
+File: config-server/src/main/resources/config/flight-service.properties
+  Line 1: Sets Flight Service port 8181.
+  Lines 2-8: Set the MySQL connection and JPA/Hibernate configuration.
+  Lines 10-16: Configure Eureka; hostname localhost and `prefer-ip-address=false`
+  avoid publishing an unstable LAN address when the computer's network changes.
+
+File: config-server/src/main/resources/config/booking-service.properties
+  Line 1: Sets Booking Service port 8182.
+  Lines 2-8: Set MySQL/JPA configuration.
+  Line 10: Defines a service-ID style Flight base URL (`http://flight-service`).
+  Lines 12-14: Configure Eureka client and localhost registration behavior.
+
+File: config-server/src/main/resources/config/api-gateway.properties
+  Line 1: Sets gateway/API-service port 8210.
+  Lines 4-6: Connect the gateway to Eureka and register it under localhost.
+  Lines 9-11: Route ID `auth-service`: requests matching `/api/auth/**` go to
+  Auth Service at port 8180.
+  Lines 13-15: Route ID `flight-service`: `/api/flights/**` goes to port 8181.
+  Lines 17-19: Route ID `booking-service`: `/api/bookings/**` goes to port 8182.
+  Lines 21-31: Define gateway routes for CheckIn, Crew and Loyalty services.
+  Lines 33-39: Map legacy/frontend paths `/flights/**` and `/airline/**` to
+  Booking Service, which owns these reservation and seat endpoints.
+  Line 41: Deduplicates CORS headers when gateway and downstream service both
+  add them.
+  Lines 43-49: Configure CORS. The listed ports are approved local frontend or
+  development-server origins. The remaining CORS lines allow HTTP methods,
+  all headers and credential-bearing requests.
+
+CONFIG-SERVER WORKFLOW
+  1. A client starts with `spring.application.name`, for example `flight-service`.
+  2. Its `spring.config.import` calls Config Server at port 8888.
+  3. Config Server finds `config/flight-service.properties` in its classpath.
+  4. Spring merges these values into the client Environment before the client
+     creates its database/Eureka/gateway configuration.
+
+================================================================
+2. DISCOVERY SERVER: discovery-server
+================================================================
+
+File: discovery-server/src/main/java/com/genc/arfoms/discovery/DiscoveryServerApplication.java
+  Lines 1-4: Package/import declarations; `EnableEurekaServer` is imported.
+  Lines 6-9: The Javadoc describes the registry's job: clients register by
+  service ID so gateway and inter-service clients do not need fixed addresses.
+  Line 10: `@EnableEurekaServer` activates Eureka Server's registry endpoints.
+  Line 11: `@SpringBootApplication` supplies regular Boot startup behavior.
+  Lines 12-15: Define the class and run it through `SpringApplication.run`.
+
+File: discovery-server/src/main/resources/application.properties
+  Line 1: Logical name `discovery-server`; Config Server uses it to choose
+  `discovery-server.properties`.
+  Line 2: Imports central configuration from Config Server, but does not fail
+  startup if Config Server is unavailable because the import is `optional`.
+
+File: discovery-server/pom.xml
+  Lines 1-10: Project XML and root parent declarations.
+  Lines 12-13: Artifact ID and description identify this runnable module.
+  Lines 15-25: `spring-cloud-starter-netflix-eureka-server` is the registry;
+  `spring-boot-starter-test` is test-only.
+  Lines 27-30: Add Spring Boot Maven packaging support.
+
+DISCOVERY WORKFLOW
+  1. Eureka listens at `http://localhost:8761/eureka/`.
+  2. Each client posts registration/heartbeat information with its application
+     name and instance URL.
+  3. A load-balanced client asks Eureka for `flight-service` and receives an
+     active instance. Booking Service uses this mechanism through OpenFeign.
+
+================================================================
+3. API SERVICE: api-gateway (repository name)
+================================================================
+
+File: api-gateway/src/main/java/com/genc/arfoms/gateway/ApiGatewayApplication.java
+  Lines 1-3: Set Java package and import Spring Boot startup classes.
+  Line 5: `@SpringBootApplication` enables gateway auto-configuration.
+  Line 6: Declares the gateway application class.
+  Lines 8-9: Standard main method launches the reactive Gateway server.
+
+File: api-gateway/src/main/resources/application.properties
+  Line 1: `api-gateway` is the Config Server configuration lookup name.
+  Line 2: Imports the central gateway properties from port 8888.
+  Line 3: Enables Feign's OkHttp support if OpenFeign is used in the process;
+  it does not define the gateway route table itself.
+
+File: api-gateway/pom.xml
+  Lines 1-10: XML root, parent and `api-gateway` module identity.
+  Lines 12-37: Pin selected Boot/Security dependency versions. The comment says
+  this avoids resolving uncached security POMs in the local development setup.
+  Lines 39-43: Add Spring Cloud Gateway WebFlux, the reactive request router.
+  Lines 45-49: Add Eureka client and LoadBalancer dependency support.
+  Lines 51-56: Add test support only for the test classpath.
+  Lines 58-68: Use Spring Boot Maven plugin to build an executable gateway JAR.
+
+GATEWAY REQUEST FLOW
+  1. The frontend sends, for example, `POST /api/auth/login` to port 8210.
+  2. Gateway finds the first matching Path predicate in central config.
+  3. It forwards the request unchanged to the configured downstream URI.
+  4. It applies configured CORS response handling and returns the downstream
+     service response to the browser.
+  Note: current route URIs are `http://localhost:PORT`, not `lb://SERVICE-ID`.
+  Eureka registration exists, but gateway route resolution is not load-balanced.
+
+================================================================
+4. AUTH SERVICE: auth-service
+================================================================
+
+File: auth-service/src/main/java/com/genc/arfoms/auth/AuthApplication.java
+  Lines 1-4: Declare package and import Spring Boot and discovery APIs.
+  Line 6: Enable Boot auto-configuration/component scanning.
+  Line 7: Enable Eureka client registration.
+  Lines 8-10: Define the class/main method and start Auth Service.
+
+File: auth-service/src/main/java/com/genc/arfoms/auth/model/User.java
+  Lines 1-3: Package and JPA imports.
+  Line 5: `@Entity` tells JPA to persist this class.
+  Line 6: `@Table(name = "users")` maps it to the `users` database table.
+  Lines 7-9: `id` is the identity-generated primary key.
+  Lines 11-12: `username` is a mandatory unique column.
+  Lines 14-21: `password`, `name`, and `role` are mandatory table columns.
+  Lines 24-25: Empty constructor is required by JPA when reading an entity.
+  Lines 27-32: Convenience constructor initializes new user business fields.
+  Lines 34-54: Conventional getters and setters expose fields to JPA, Jackson
+  JSON binding and application code. They contain no extra business logic.
+
+File: auth-service/src/main/java/com/genc/arfoms/auth/repository/UserRepository.java
+  Lines 1-6: Package/imports and `@Repository`, enabling Spring Data exception
+  translation and component discovery.
+  Line 7: Extending `JpaRepository<User, Long>` supplies save/find/delete CRUD.
+  Line 8: Method name creates a derived SQL query to find an optional user by
+  username.
+
+File: auth-service/src/main/java/com/genc/arfoms/auth/JwtUtils.java
+  Lines 1-7: Import JWT claim/parser/key APIs and Spring configuration support.
+  Line 9: `@Component` creates one injectable JWT helper bean.
+  Lines 12-13: Read `jwt.secret`; if absent use the coded default HMAC key.
+  Lines 15-16: Read expiry; default is 86,400,000 milliseconds (24 hours).
+  Lines 18-28: `generateToken` creates a claims map with `role`, uses username
+  as subject, assigns issued/expiry timestamps, signs with HMAC-SHA256 and
+  returns compact JWT text.
+  Lines 30-32: Read the JWT subject (username).
+  Lines 34-36: Read the custom `role` claim as a String.
+  Lines 38-41: Parse username and compare it to the expected caller username.
+  Lines 43-46: `validateToken(token)` parses a signed JWS. Parse failure covers
+  invalid signature, malformed tokens and expired tokens.
+  Lines 48-51: Private parser helper builds a parser with the same signing key
+  and returns all token claims.
+
+File: auth-service/src/main/java/com/genc/arfoms/auth/AuthController.java
+  Lines 1-13: Import User/repository/logging/HTTP/web/exception/collection APIs.
+  Line 15: Marks this class as JSON REST controller.
+  Line 16: All methods begin with `/api/auth`.
+  Lines 18-25: Define logger plus injected JwtUtils and UserRepository fields.
+  Lines 27-52: POST `/login` method. It obtains `username` and `password` from
+  request JSON, logs the attempt, rejects missing values, queries the user,
+  directly compares passwords, generates token on a match, and returns token,
+  role and name. A mismatch throws `PasswordIncorrectException`.
+  Lines 54-84: POST `/register`. It validates all four required fields, rejects
+  an existing username, normalizes the role to lowercase, accepts only admin,
+  reservation agent, ground staff, flight dispatcher, crew scheduler or loyalty
+  manager, saves user and returns HTTP 201 with user ID.
+  Lines 86-91: GET `/validate?token=...`; calls JWT parser and returns text only
+  when the token is valid.
+
+File: auth-service/src/main/java/com/genc/arfoms/auth/DataInitializer.java
+  Lines 1-9: Imports the entity/repository/logging/runner component types.
+  Line 11: `@Component` makes this startup seeder a Spring bean.
+  Lines 13-16: Logger and repository dependencies; constructor injection is used.
+  Lines 18-31: `run` executes on startup and calls `upsertUser` for six default
+  accounts: admin, scheduler, agent, crew, loyalty and groundstaff.
+  Lines 33-45: `upsertUser` queries by username. Existing accounts are updated;
+  absent accounts are constructed and saved. Thus each start resets these known
+  users' password/name/role to code defaults.
+
+File: auth-service/src/main/java/com/genc/arfoms/auth/config/SecurityConfig.java
+  Line 16: Marks security configuration as a bean source.
+  Lines 18-22: Constructor receives the JWT filter to install in the chain.
+  Lines 24-41: Build the security filter chain: disable CSRF; permit OPTIONS,
+  login/register/validate/error; require authentication otherwise; use no HTTP
+  session; enable CORS; disable form login; run JWT filter before normal login.
+  Lines 43-62: Build CORS rules: only listed local development origins may call,
+  allowed methods include standard REST verbs, all headers are accepted, cookies/
+  credentials are allowed, and browser preflight may be cached for one hour.
+
+File: auth-service/src/main/java/com/genc/arfoms/auth/config/JwtRequestFilter.java
+  Lines 1-16: Imports servlet/Spring Security classes and marks the once-per-
+  request filter as a component.
+  Lines 18-22: Inject JwtUtils.
+  Lines 24-30: Method signature and OPTIONS bypass; CORS preflight is not JWT
+  authenticated.
+  Lines 32-38: Read Authorization header, or accept `access_token` parameter
+  and convert it into a Bearer header.
+  Lines 40-42: Allocate username, token and role variables.
+  Lines 44-51: If header begins `Bearer `, strip the prefix and parse username/
+  role; parsing errors are logged instead of crashing the filter.
+  Lines 53-66: If a parsed user has no existing authentication and subject
+  validation succeeds, construct `ROLE_<NORMALIZED_ROLE>` authority and put an
+  authenticated principal into `SecurityContextHolder`.
+  Line 68: Continue processing the request through the remainder of the chain.
+
+File: auth-service/src/main/java/com/genc/arfoms/auth/exception/GlobalExceptionHandler.java
+  Line 11: `@RestControllerAdvice` catches matching exceptions from all REST
+  controllers and returns JSON responses.
+  Lines 15-21: Duplicate username becomes 409 Conflict.
+  Lines 23-29: Invalid password becomes 401 Unauthorized.
+  Lines 31-37: Illegal argument becomes 400 Bad Request.
+  Lines 39-45: Missing element becomes 404 Not Found.
+  Lines 47-53: Invalid state becomes 409 Conflict.
+  Lines 55-61: Any unhandled exception is logged and becomes 500.
+  In each case `ResponseData(null, false, message)` gives a consistent body.
+
+File: auth-service/src/main/java/com/genc/arfoms/auth/dto/ResponseData.java
+  Lines 3-5: Generic DTO fields: data payload, success flag and message.
+  Lines 7-12: Empty and full constructors.
+  Lines 14-30: Standard accessors used by JSON serialization.
+
+File: auth-service/src/main/resources/application.properties
+  Line 1: Gives Config Server the lookup name `auth-service`.
+  Line 2: Imports the auth central properties from Config Server.
+
+AUTH SECURITY FLOW
+  1. `/api/auth/login` checks a MySQL user and returns a signed JWT.
+  2. The browser includes it as `Authorization: Bearer <token>`.
+  3. The filter verifies the signature with the shared key and loads role into
+     the SecurityContext.
+  Security warning: current code compares/stores plain-text passwords. Use a
+  `PasswordEncoder` (BCrypt/Argon2) before production use.
+
+================================================================
+5. FLIGHT SERVICE: flight-service
+================================================================
+
+File: flight-service/src/main/java/com/genc/arfoms/flight/FlightServiceApplication.java
+  Lines 1-3: Package/import.
+  Line 5: Enable Spring Boot application configuration.
+  Lines 6-9: Define class and start its embedded server.
+
+File: flight-service/src/main/java/com/genc/arfoms/flight/controller/FlightController.java
+  Lines 1-14: Import DTOs, entities, service and Spring MVC types.
+  Line 16: Make this a REST controller.
+  Line 17: Set every route base to `/api/flights`.
+  Lines 19-23: Constructor injects the FlightService abstraction.
+  Lines 25-28: GET base path returns all persisted flights.
+  Lines 30-37: GET `/id/{flightId}` fetches numeric ID and throws an HTTP 404
+  FlightException if FlightService returns null.
+  Lines 39-43: GET `/{flightNumber}` finds flight number or throws 404.
+  Lines 45-50: POST base path converts `FlightRequest` to entity, saves it and
+  returns the freshly loaded Flight with 201 Created.
+  Lines 52-59: PUT/PATCH `/{identifier}/schedule` accepts either ID/number,
+  invokes schedule update and returns the updated record.
+  Lines 61-68: PUT/PATCH fare paths update economy, premium and first fares.
+  Lines 70-75: DELETE accepts ID/number and returns 204 after deletion.
+  Lines 77-86: POST `/search` reads route/date/type/passengers criteria from a
+  JSON Map and returns FlightService filtered results.
+  Lines 88-101: GET `/metadata` joins Indian and international airport lists and
+  returns statuses plus all three airport lists for frontend controls.
+
+File: flight-service/src/main/java/com/genc/arfoms/flight/service/FlightService.java
+  Lines 1-6: Package/imports and interface declaration.
+  Lines 8-20: Define the contract implemented by FlightServiceImpl: retrieve,
+  create/delete/update flights, alter fares, resolve an identifier and search.
+  Interfaces let controllers depend on behavior rather than implementation.
+
+File: flight-service/src/main/java/com/genc/arfoms/flight/service/FlightServiceImpl.java
+  Lines 1-20: Imports and `@Service`/`@Transactional`; all public write methods
+  run in Spring-managed database transactions.
+  Lines 22-26: Logger, datetime formats, Earth radius and cruise-speed constants.
+  Lines 28-34: Build immutable valid airport-code set from domestic/international
+  airport model lists.
+  Lines 36-83: Define IATA-code-to-coordinate entries used for route distance
+  calculation. Each Map entry is latitude/longitude in degrees.
+  Lines 85-93: Declare Flight and SeatInventory repositories and inject them via
+  constructor.
+  Lines 95-138: Optional startup seat seeding. It runs only with JVM property
+  `seed.seats=true`, parses `seed.flightId`, verifies flight/layout/existing
+  seats, then creates AVAILABLE A1... seats and saves them.
+  Lines 141-146: `getAllFlights` is read-only transactional and delegates to
+  `findAll`.
+  Lines 149-154: Validate a flight number before case-insensitive lookup.
+  Lines 157-164: Return null for null ID; otherwise find by primary key.
+  Lines 167-206: `addFlight`: validate request, normalize airport codes, reject
+  same origin/destination, normalize times, reject past/bad schedule, calculate
+  distance, set default SCHEDULED status, require/validate all fares, prevent
+  duplicate flight number, save Flight and create its seats.
+  Lines 208-229: `createSeatInventory` uses rows/columns to create seat labels
+  and marks every new seat AVAILABLE.
+  Lines 231-241: `rowLetter` converts zero-based row index to A..Z, AA... label.
+  Lines 244-258: `deleteFlight` finds the flight, deletes matching seat records,
+  then deletes the flight.
+  Lines 261-281: `updateSchedule` applies only supplied time/status values,
+  validates chronological order, recalculates distance and saves.
+  Lines 284-297: `setFares` validates all three prices, updates fields and keeps
+  the legacy/general `fare` equal to economy fare.
+  Lines 299-315: `setFareClass` chooses the requested fare-class field and
+  saves after validation.
+  Lines 317-359: Validation helpers reject blank/invalid flight numbers, unknown
+  airports, invalid dates/schedules/fares and duplicate route errors.
+  Lines 361-390: Date normalization accepts configured input formats, produces
+  consistent stored text and prevents past departure dates using India time.
+  Lines 392-406: Calculate Haversine/great-circle mileage from stored coords;
+  fall back behavior is controlled by validation helpers.
+  Lines 408-440: Build city/IATA normalization mapping and helper functions for
+  matching a search request to stored airports/dates.
+  Lines 442-466: Determine international status, declared capacity and attach
+  available-seat count. Inventory is preferred; seat count/layout is fallback.
+  Lines 469-513: `searchAvailableFlights` filters all flights by canonical route,
+  requested/current date, type, de-duplicates duplicate flight numbers, sets
+  airline name and availability.
+  Lines 516-530: `findByFlightNumberOrId` first treats identifier as Long ID;
+  if not found/not numeric it performs case-insensitive flight-number lookup;
+  otherwise throws 404.
+
+File: flight-service/src/main/java/com/genc/arfoms/flight/service/AirportDistanceService.java
+  Lines 1-8: Defines a separate `@Service` distance calculator and documentation.
+  Lines 13-54: Fixed IATA coordinate map covering listed Indian/international
+  airports.
+  Lines 63-77: `distanceMiles` applies Haversine math then rounds to one decimal.
+  Lines 79-81: `isKnownAirport` checks map membership after uppercase trimming.
+  Lines 83-90: `coordinatesFor` validates input and throws helpful errors for
+  unknown codes. This service is present but FlightServiceImpl currently uses
+  its own embedded coordinate map rather than injecting this class.
+
+File: flight-service/src/main/java/com/genc/arfoms/flight/repository/FlightRepository.java
+  Lines 1-7: Repository imports, annotation and JPA CRUD inheritance.
+  Line 8: Derived query performs case-insensitive `flightNumber` lookup.
+
+File: flight-service/src/main/java/com/genc/arfoms/flight/repository/SeatInventoryRepository.java
+  Lines 1-10: Imports/JPA repository declaration.
+  Lines 12-13: JPQL gets all seats belonging to a flight entity ID.
+  Lines 15-16: Same query with ascending seat number ordering.
+  Lines 18-19: Get seats matching flight and `SeatStatus`.
+  Lines 21-22: Get one seat by flight and seat label.
+
+File: flight-service/src/main/java/com/genc/arfoms/flight/model/Flight.java
+  Lines 1-5: Package/imports plus Lombok/JPA annotations.
+  Lines 7-10: Entity/table declaration and generated `flightId` primary key.
+  Lines 12-31: Persist flight number, name, airline ID, origin, destination,
+  times, status and base fare fields.
+  Lines 33-48: Persist three fare classes, route distance and seat-layout/count.
+  Lines 50-72: `availableSeats` is transient/display data (not database state)
+  and Lombok `@Data` creates boilerplate getters/setters/equals/hashCode.
+
+File: flight-service/src/main/java/com/genc/arfoms/flight/model/SeatInventory.java
+  Lines 1-8: Entity imports and table mapping.
+  Lines 10-15: Generated primary key.
+  Lines 17-19: Many seat rows refer to one Flight using `flight_id`.
+  Lines 21-34: Store seat label, column/row layout and seat status.
+  Lines 36-47: Explicit accessors support JPA/JSON. `SeatStatus` encodes values
+  such as AVAILABLE/BOOKED.
+
+File: flight-service/src/main/java/com/genc/arfoms/flight/config/SecurityConfig.java
+  Lines 16-22: Configure an injectable JWT request filter.
+  Lines 24-40: Disable CSRF, permit preflight plus GET Flight APIs and POST
+  search, require JWT for all mutations, use stateless sessions, enable CORS and
+  insert filter before standard credentials processing.
+  Lines 42-57: CORS bean permits listed local origins/methods/all headers.
+
+File: flight-service/src/main/java/com/genc/arfoms/flight/config/JwtRequestFilter.java
+  Lines 18-57: Same shared JWT-filter design as Auth Service: bypass OPTIONS,
+  read Bearer/query token, parse username/role, verify subject/signature, create
+  `ROLE_*` authority and continue filter chain.
+
+File: flight-service/src/main/java/com/genc/arfoms/flight/config/JwtUtils.java
+  Lines 9-40: Same signed-token parser/helper pattern as Auth Service. This
+  duplication means all services must use the same external JWT secret.
+
+File: flight-service/src/main/resources/application.properties
+  Line 1: Sets Config Server lookup name `flight-service`.
+  Line 2: Imports central Config Server settings.
+
+================================================================
+6. BOOKING SERVICE: booking-service
+================================================================
+
+File: booking-service/src/main/java/com/genc/arfoms/booking/BookingServiceApplication.java
+  Lines 1-4: Package/imports.
+  Line 6: Enable normal Spring Boot setup.
+  Line 7: `@EnableFeignClients` scans `@FeignClient` interfaces and creates HTTP
+  proxy beans.
+  Lines 8-11: Main class/method launches Booking Service.
+
+File: booking-service/src/main/java/com/genc/arfoms/booking/client/FlightClient.java
+  Lines 1-10: Define imports and declare Feign client named `flight-service`.
+  Lines 12-13: Map proxy method to Flight's GET by ID endpoint.
+  Lines 15-16: Map proxy method to Flight's search endpoint.
+  Lines 18-19: Map proxy method to Flight's all-flights endpoint.
+  Feign resolves this name with Eureka/Spring Cloud LoadBalancer and creates
+  ordinary Java method calls that make HTTP requests.
+
+File: booking-service/src/main/java/com/genc/arfoms/booking/config/FeignClientInterceptor.java
+  Lines 1-6: Make a Feign RequestInterceptor Spring configuration bean.
+  Lines 8-18: When a servlet request exists, read its Authorization header and
+  place it into the outgoing Feign template. This forwards the user's JWT from
+  Booking Service to Flight Service.
+
+File: booking-service/src/main/java/com/genc/arfoms/booking/controller/BookingController.java
+  Lines 1-12: Import booking models/service/MVC/logging types.
+  Lines 14-20: REST controller, logger, and constructor-injected BookingService.
+  Lines 23-27: GET `/flights` calls search with an empty Booking criteria object.
+  Lines 30-37: POST `/flights/search` logs submitted route/date/type and returns
+  matching flights.
+  Lines 40-44: POST `/flights/passenger` creates/prepares a booking draft.
+  Lines 47-51: GET passenger endpoint retrieves one Passenger by ID.
+  Lines 54-61: Validate duplicate passenger constraints and return `{ok:true}`.
+  Lines 64-68: Confirm/persist a rich Booking request.
+  Lines 70-99: POST `/api/bookings` accepts a lightweight Map; extracts flight,
+  seat and fare; constructs one default passenger from passengerName; then saves
+  through the main booking workflow and returns 201.
+  Lines 102-106: Return booking confirmation by ID.
+  Lines 109-113: Return the latest booking for manage-booking screen.
+  Lines 116-120: Return all bookings.
+  Lines 123-127: Modify a booking with request body fields.
+  Lines 130-134: Cancel a booking by ID.
+
+File: booking-service/src/main/java/com/genc/arfoms/booking/controller/SeatPaymentController.java
+  Lines 1-21: Imports, format constants and injected SeatPayment/Flight/Passenger
+  services. Time/date formatters transform stored departure text for UI.
+  Lines 27-65: GET `/airline/api/seats`. Read all seats; derive booked seat
+  labels; fetch Flight through Feign and first passenger; return a map containing
+  seats, flight, passenger, formatted times/date and seat layout fields.
+  Lines 68-78: `formatStored` parses `yyyy-MM-dd HH:mm` safely or returns raw/-.
+  Lines 82-87: GET `/api/payment` creates a payment preview.
+  Lines 89-109: POST `/booking/confirm` calls booking confirmation and returns
+  success/message. It adds booking ID, seat and total only on success; failures
+  return HTTP 400.
+
+File: booking-service/src/main/java/com/genc/arfoms/booking/service/BookingService.java
+  Lines 1-7: Declare booking service interface/imports.
+  Lines 9-29: Declare search, draft, create, duplicate validation, select,
+  modify/cancel, read booking and read passenger methods. Controller is coupled
+  to this interface, not the concrete implementation.
+
+File: booking-service/src/main/java/com/genc/arfoms/booking/service/BookingServiceImpl.java
+  Lines 1-18: Imports and service class declaration.
+  Lines 20-26: Logger, consistent error text, maximum passengers 9, India time
+  zone and international-airport lookup set.
+  Lines 28-43: Declare and constructor-inject booking, flight-client, seat,
+  passenger and mock-payment collaborators.
+  Lines 45-82: `searchAvailableFlights` calls Flight Service for all flights;
+  canonicalizes route/date; filters by route/date; de-duplicates flight number;
+  filters by domestic/international type; assigns airline display names and
+  overlays local seat availability.
+  Lines 84-106: `attachAvailableSeats` counts AVAILABLE seat rows. If inventory
+  exists but none available it sets zero; on absent/error it uses declared seat
+  capacity instead.
+  Lines 108-126: `declaredCapacity` and `resolveAirlineName` helper behavior.
+  Lines 128-166: Build domestic/international city/IATA lookup maps, so UI may
+  send city names or airport codes interchangeably.
+  Lines 168-203: Canonicalize locations and parse/extract dates robustly.
+  Lines 205-229: `prepareBookingDraft` fills defaults, clamps passenger count to
+  1..9, creates empty Passenger slots, synchronizes date fields and calculates
+  display fare.
+  Lines 231-291: `createBooking` is transactional. It checks booking/flight ID,
+  calls Flight Service to confirm flight existence, normalizes passenger slots,
+  checks duplicate passengers, derives route/flight values, calls mock payment
+  for PNR/status, saves booking (with passenger relations), awards distance
+  miles, and returns saved entity.
+  Lines 293-332: `validateNoDuplicatePassengerOnFlight` checks each passenger
+  using ID/email query. A match throws IllegalStateException to prevent multiple
+  active seats for the same passenger on one flight.
+  Lines 334-351: `awardDistanceMiles` fetches route miles through Feign and adds
+  that number to each passenger; errors only warn, so booking survives a miles
+  update failure.
+  Lines 353-357: `findSeat` safely locates a local seat inventory record.
+  Lines 359-367: `selectSeat` loads booking, optionally changes seat, saves it.
+  Lines 369-404: `modifyBooking` loads existing entity, applies only supplied
+  fields, resizes passenger slots if count changes, recalculates fare and saves.
+  Lines 406-424: `cancelBooking` marks CANCELLED. If the booking selected a
+  locally BOOKED seat, it changes it back to AVAILABLE in the same transaction.
+  Lines 426-445: Latest/by-ID/all retrieval functions. Missing data returns a
+  hard-coded preview rather than a 404.
+  Lines 447-462: The preview contains sample domestic flight/PNR/seat/fare data.
+  Lines 464-478: Fare and utility helpers: domestic=5200, international=18500,
+  passenger count clamped from 1 to 9, and passenger list grows/shrinks to count.
+
+File: booking-service/src/main/java/com/genc/arfoms/booking/service/SeatPaymentService.java
+  Lines 1-18: Imports and `@Service`; constants define mock fare values and
+  stored/display date formats.
+  Lines 20-35: Inject repositories, Flight client, Passenger service and mock
+  payment service via constructor.
+  Lines 37-57: Seat read/count methods delegate to repository queries for all,
+  available or booked seats.
+  Lines 59-64: `isSeatBooked` returns true only for an existing BOOKED record.
+  Lines 66-79: `confirmSeatSelection` transactionally fetches seat and changes
+  it from AVAILABLE to BOOKED. It returns false when unavailable/missing.
+  Lines 81-91: Reset method changes an existing named seat back to AVAILABLE.
+  Lines 93-109: Basic Payment repository CRUD wrapper methods.
+  Lines 111-143: `confirmBooking` checks required inputs, detaches the selected
+  passenger's booking reference to avoid transient entity trouble, reserves
+  seat, returns existing payment if already saved, otherwise builds/saves a
+  payment record and returns successful result.
+  Lines 145-181: `buildBooking` calculates seat surcharge/total, fetches Flight,
+  gets a passenger, generates mock PNR, fills Payment fare/route/time fields
+  and embeds the PNR in passenger display text.
+  Lines 183-202: Format stored time helper, seat-charge rules and Long-to-Integer
+  ID conversion. Columns 1/4 incur window charge; 2/3 incur aisle charge.
+
+File: booking-service/src/main/java/com/genc/arfoms/booking/service/MockPaymentService.java
+  Lines 1-10: Service declaration and static secure random alphabet.
+  Lines 12-14: Mock processing returns random PNR and fixed CONFIRMED status.
+  Lines 16-18: Public PNR method asks helper for eight characters.
+  Lines 20-26: Loop selects secure random A-Z/0-9 characters and returns token.
+  Lines 28-30: Java record is an immutable response containing PNR/status.
+
+File: booking-service/src/main/java/com/genc/arfoms/booking/service/PassengerService.java
+  Lines 1-9: Spring service with autowired PassengerRepository.
+  Lines 11-14: `getPassenger` returns the first row in the Passenger table or
+  null. This is a demo convenience, not a user/session-specific selection.
+
+File: booking-service/src/main/java/com/genc/arfoms/booking/repository/BookingRepository.java
+  Lines 1-8: JPA CRUD repository for Booking.
+  Line 10: Derived query returns newest booking by descending ID.
+  Line 11: Derived query returns all bookings newest first.
+  Line 12: Derived query looks up booking by PNR.
+
+File: booking-service/src/main/java/com/genc/arfoms/booking/repository/PassengerRepository.java
+  Lines 1-9: JPA CRUD repository and email lookup.
+  Lines 11-16: JPQL finds passenger bookings on a flight when same passenger ID
+  or case-insensitive email matches; used to prevent duplicate booking.
+
+File: booking-service/src/main/java/com/genc/arfoms/booking/repository/SeatInventoryRepository.java
+  Lines 1-10: JPA repository declaration.
+  Lines 12-20: JPQL retrieves a flight's seats, ordered seats, seats by status,
+  or an exact seat. Unlike Flight's version it stores/query `s.flightId` directly.
+
+File: booking-service/src/main/java/com/genc/arfoms/booking/repository/PaymentRepository.java
+  Lines 1-8: JPA CRUD repository for Payment.
+  Lines 10-12: JPQL fetches payment by flight ID and seat label for idempotent
+  seat confirmation behavior.
+
+File: booking-service/src/main/java/com/genc/arfoms/booking/model/Booking.java
+  Lines 1-9: Entity/table declaration and generated booking ID.
+  Lines 11-38: Persist flight type, locations, airline, passenger count, dates,
+  seat, fare, status and PNR.
+  Lines 40-47: Persist Flight ID reference as a scalar.
+  Lines 49-62: One booking owns its passenger details; cascade/all and orphan
+  removal let save/delete manage child Passenger entities.
+  Lines 64-89: Accessors for JPA/Jackson; no independent business processing.
+
+File: booking-service/src/main/java/com/genc/arfoms/booking/model/Passenger.java
+  Lines 1-8: Entity/table and generated Passenger ID.
+  Lines 10-20: Persist personal/contact/demographic and accumulated distance data.
+  Lines 22-25: Many passengers belong to one Booking; `@JsonIgnore` avoids
+  serializing a circular booking -> passenger -> booking graph.
+  Lines 27-33: Lombok generates normal boilerplate accessors.
+
+File: booking-service/src/main/java/com/genc/arfoms/booking/model/Payment.java
+  Lines 1-8: Entity/table mapping and generated booking/payment ID.
+  Lines 10-42: Persist fare components, seat, flight scalar fields, route/time
+  display values and passenger name.
+  Lines 44-52: Standard model accessors/annotations.
+
+File: booking-service/src/main/java/com/genc/arfoms/booking/model/SeatInventory.java
+  Lines 1-8: Entity/table and generated ID.
+  Lines 10-20: Persist scalar flight ID and seat label.
+  Lines 22-35: Persist column, row and enumerated seat status.
+  Lines 37-40: Lombok/boilerplate supports persistence and JSON.
+
+File: booking-service/src/main/java/com/genc/arfoms/booking/config/SecurityConfig.java
+  Lines 16-22: Create security configuration with JWT filter dependency.
+  Lines 24-42: Disable CSRF; permit OPTIONS, all listed booking/seat/payment
+  frontend endpoints and error; require authentication only for other paths;
+  make sessions stateless; configure CORS/JWT filter.
+  Lines 44-60: Define local-development CORS origins/methods/headers/credentials.
+
+File: booking-service/src/main/java/com/genc/arfoms/booking/config/JwtRequestFilter.java
+  Lines 18-57: Same Bearer JWT parsing and SecurityContext setup used in Auth and
+  Flight services. It accepts header/query token, creates normalized authority,
+  then advances request chain.
+
+File: booking-service/src/main/java/com/genc/arfoms/booking/config/JwtUtils.java
+  Lines 9-40: Same HS256 token helper pattern. It can generate, parse role/user,
+  validate username and parse signed claims.
+
+File: booking-service/src/main/resources/application.properties
+  Line 1: Sets Config Server lookup name `booking-service`.
+  Line 2: Imports central configuration from port 8888.
+
+BOOKING END-TO-END CODE PATH
+  1. Browser asks gateway `/flights/search`; gateway routes it to Booking.
+  2. BookingServiceImpl calls Feign `FlightClient.getAllFlights` by service name.
+  3. User submits passenger details; Booking creates/validates a Booking draft.
+  4. Seat page retrieves `/airline/api/seats` and shows AVAILABLE/BOOKED seats.
+  5. Confirmation transaction changes one seat to BOOKED, builds a mock Payment
+     record and returns its generated PNR-like booking identifier.
+  6. Cancellation changes status and attempts to release that selected seat.
+
+================================================================
+7. COMMON BUILD AND CROSS-SERVICE CODE
+================================================================
+
+File: microservices/pom.xml (root parent)
+  Lines 1-14: Maven project identity; `packaging=pom` means this module aggregates
+  children instead of producing the application itself.
+  Lines 16-22: Define shared Java 21, Spring Boot, Spring Cloud and Log4j2 versions.
+  Lines 24-52: Import Spring Boot/Cloud dependency BOMs and manage Log4j versions,
+  giving all child modules compatible dependency versions.
+  Lines 54-59: Add Spring Cloud Config client dependency inherited by modules.
+  Lines 61-71: List every child service module Maven should build.
+  Lines 73-104: Define common Surefire, Boot repackaging and Java compiler plugin
+  configuration. Compiler release 21 and `parameters=true` preserve parameter
+  names for Spring MVC/reflection.
+
+Common JWT implementation note
+  Auth, Flight and Booking each have separate `JwtUtils` and `JwtRequestFilter`
+  source files. Their line-by-line logic is intentionally almost identical: a
+  token signed by Auth is accepted by the other services only because they use
+  the same secret/default configuration and HS256 algorithm.
+
+Important code-level limitations identified while explaining
+  * Gateway central routes use hard-coded localhost ports instead of `lb://`.
+  * Passwords are compared/stored as plain text in AuthController/User.
+  * Booking endpoints are mostly permitted without JWT in Booking SecurityConfig.
+  * MockPaymentService is not a payment gateway; it only generates a random PNR.
+  * Flight and Booking each access seat inventory representations while sharing
+    one MySQL schema. A production microservice design should give one service
+    ownership and communicate seat changes by API/event.
+
+END OF LINE-BY-LINE GUIDE
