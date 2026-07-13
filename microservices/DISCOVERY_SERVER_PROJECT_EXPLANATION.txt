@@ -1,0 +1,407 @@
+ARFOMS DISCOVERY SERVER - EASY PROJECT EXPLANATION
+===================================================
+
+This document explains the `discovery-server` module in the ARFOMS project.
+It covers what it is, why it exists, how every meaningful source/configuration
+line works, and how it participates in the project's startup workflow.
+
+As requested, blank lines and structural closing braces are not explained.
+
+
+1. WHAT IS DISCOVERY SERVER?
+----------------------------
+
+Discovery Server is the service directory for ARFOMS. It uses Netflix Eureka.
+
+Think of it as an address book:
+
+  Service name              Registered address
+  --------------------------------------------------------
+  flight-service            http://localhost:8181
+  booking-service           http://localhost:8182
+  auth-service              http://localhost:8180
+  api-gateway               http://localhost:8210
+
+Instead of Booking Service remembering a fixed Flight Service address, it asks
+Eureka: "Where is flight-service?" Eureka returns the address of the currently
+running instance.
+
+
+2. WHY IS IT USED IN ARFOMS?
+----------------------------
+
+ARFOMS is split into independent microservices. Each service starts separately
+and has its own port. The address can change when a service is moved, restarted,
+or scaled to multiple instances.
+
+Discovery Server solves this problem by allowing services to use logical names,
+such as `flight-service`, instead of embedding `localhost:8181` everywhere.
+
+Project examples:
+
+  - Booking Service uses the Eureka name `flight-service` to get flight data.
+  - Check-in Service uses `booking-service` and `flight-service` to verify a
+    booking and show flight information.
+  - Crew and Loyalty services use `flight-service` for schedule/distance data.
+  - API Gateway registers in the same registry, making the running system easy
+    to inspect from one place.
+
+Why this matters:
+
+  - Less hard-coded network information in Java code.
+  - A service can be restarted without changing clients.
+  - Spring Cloud/OpenFeign can load-balance by service name later.
+  - Eureka UI shows which ARFOMS services are currently alive.
+
+
+3. WHERE IT FITS IN THE STARTUP WORKFLOW
+-----------------------------------------
+
+Recommended local startup order:
+
+  1. Config Server (port 8888)
+  2. Discovery Server / Eureka (port 8761)
+  3. API Gateway, Auth, Flight, Booking, Check-in, Crew, Loyalty
+
+Why this order is important:
+
+  - Discovery Server imports its central configuration from Config Server.
+  - Other services need Discovery Server to register under their service name.
+  - Booking cannot reliably resolve `flight-service` through Eureka until
+    Flight Service has registered.
+
+Workflow after startup:
+
+  Flight Service ---- registers as `flight-service` ----\
+  Booking Service --- registers as `booking-service` -----> Eureka :8761
+  Auth Service ------ registers as `auth-service` --------/
+
+  Booking Service asks Eureka: "Find flight-service"
+  Eureka returns the active Flight Service instance address.
+  Booking Service then makes its request to Flight Service.
+
+
+4. Java SOURCE: DiscoveryServerApplication.java
+------------------------------------------------
+
+Path:
+  discovery-server/src/main/java/com/genc/arfoms/discovery/
+  DiscoveryServerApplication.java
+
+This is the only Java application class in this module. Its one method is
+`main`; its role is to launch the Eureka registry.
+
+Meaningful code, line by line:
+
+Line 1
+  package com.genc.arfoms.discovery;
+
+  Places this Java class in the Discovery Server package. Spring Boot uses the
+  package as the starting area for component scanning. Keeping it separate from
+  business-service packages makes this infrastructure service independent.
+
+Line 3
+  import org.springframework.boot.SpringApplication;
+
+  Imports Spring Boot's startup helper. The `main` method calls it to create
+  the Spring application context and start the embedded HTTP server.
+
+Line 4
+  import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+  Imports the annotation that enables normal Spring Boot application setup:
+  component scanning, auto-configuration, and configuration support.
+
+Line 5
+  import org.springframework.cloud.netflix.eureka.server.EnableEurekaServer;
+
+  Imports the annotation that turns this Spring Boot application into a Netflix
+  Eureka Server. Without it, the application would start as a normal Spring
+  Boot process but would not provide Eureka's registry endpoints or dashboard.
+
+Lines 7 to 11
+  /**
+   * Netflix Eureka service registry. Every ARFOMS microservice registers here so
+   * the gateway and inter-service clients can discover each other by service id
+   * instead of relying on hardcoded host:port values.
+   */
+
+  This is a documentation comment. It describes the exact ARFOMS design:
+
+  - Each running service sends a registration/heartbeat to this server.
+  - Gateway and inter-service clients use service IDs instead of fixed ports.
+  - This makes the project less tightly coupled to local network addresses.
+
+Line 12
+  @EnableEurekaServer
+
+  Activates Eureka Server functionality.
+
+  How it is used in this project:
+  Spring reads this annotation during startup and creates Eureka registry APIs.
+  Services can then call `http://localhost:8761/eureka/` to register and send
+  heartbeats. You can also open the Eureka dashboard at port 8761 to inspect
+  registered ARFOMS applications.
+
+Line 13
+  @SpringBootApplication
+
+  Marks this as the main Spring Boot application.
+
+  It effectively combines:
+
+  - @Configuration: class can define Spring configuration.
+  - @EnableAutoConfiguration: configures known libraries automatically.
+  - @ComponentScan: finds Spring components in this package tree.
+
+  Why both annotations are needed:
+  @SpringBootApplication starts a normal Spring Boot application;
+  @EnableEurekaServer adds the special registry behaviour to it.
+
+Line 14
+  public class DiscoveryServerApplication {
+
+  Declares the executable Java class. `public` means Java and the Spring Boot
+  Maven plugin can access it. The class name is passed to Spring in line 17.
+
+Line 16
+  public static void main(String[] args) {
+
+  This is the only method in the class and Java's required application entry
+  point. When you run Discovery Server from an IDE or JAR, JVM execution starts
+  here.
+
+  `public` lets the JVM call it.
+  `static` lets the JVM call it without constructing an object.
+  `void` means it returns no value.
+  `String[] args` accepts command-line options, if supplied.
+
+Line 17
+  SpringApplication.run(DiscoveryServerApplication.class, args);
+
+  This line launches Discovery Server.
+
+  Step-by-step workflow triggered by this call:
+
+  1. Spring creates the application context.
+  2. Spring reads local application.properties.
+  3. The import in application.properties contacts Config Server at port 8888.
+  4. Config Server supplies discovery-server.properties.
+  5. Spring applies server port 8761 and the Eureka settings.
+  6. @SpringBootApplication auto-configures Spring Boot.
+  7. @EnableEurekaServer exposes the Eureka registry and dashboard.
+  8. The server waits for ARFOMS services to register and send heartbeats.
+
+  `DiscoveryServerApplication.class` tells Spring which class is the primary
+  source of configuration. `args` passes any command-line arguments into Spring.
+
+
+5. LOCAL BOOTSTRAP: application.properties
+-------------------------------------------
+
+Path:
+  discovery-server/src/main/resources/application.properties
+
+This small local file is intentionally minimal. It tells Discovery Server its
+name and where Config Server is. The remaining runtime settings are centralised
+in Config Server.
+
+Line 1
+  spring.application.name=discovery-server
+
+  Gives this application the logical identity `discovery-server`.
+
+  How it is used:
+  Config Server receives this name and searches for
+  `config/discovery-server.properties`. This is why the file name must match
+  this value exactly.
+
+Line 2
+  spring.config.import=optional:configserver:http://localhost:8888
+
+  Tells Spring to import external configuration from Config Server on port 8888.
+
+  Breakdown:
+
+  `spring.config.import`
+    Spring Boot property for importing an additional configuration source.
+
+  `configserver:`
+    Says that the source is a Spring Cloud Config Server.
+
+  `http://localhost:8888`
+    The Config Server address defined by this ARFOMS local environment.
+
+  `optional:`
+    Allows the application to start if Config Server is temporarily unavailable.
+    This helps local development, but normally Config Server should be running;
+    otherwise Discovery Server will not receive its central port/Eureka values.
+
+
+6. CENTRAL SETTINGS: discovery-server.properties
+-------------------------------------------------
+
+Path:
+  config-server/src/main/resources/config/discovery-server.properties
+
+This file is physically inside Config Server because Config Server owns shared
+settings. Discovery Server receives it during startup because its application
+name is `discovery-server`.
+
+Line 1
+  server.port=8761
+
+  Makes the Eureka server listen on port 8761. Every ARFOMS Eureka client uses
+  `http://localhost:8761/eureka/`, so this port must stay aligned with their
+  `eureka.client.service-url.defaultZone` settings.
+
+Line 3
+  # A standalone registry does not register with or fetch from itself.
+
+  Comment for developers. It explains why lines 4 and 5 are false. The comment
+  is not executed by Spring.
+
+Line 4
+  eureka.client.register-with-eureka=false
+
+  Prevents Discovery Server from trying to register itself as an ordinary
+  Eureka client.
+
+  Why it is used:
+  This project has one standalone registry. It is the directory that receives
+  registrations; it does not need to appear inside its own directory.
+
+Line 5
+  eureka.client.fetch-registry=false
+
+  Prevents Discovery Server from trying to download registry information from
+  another Eureka server.
+
+  Why it is used:
+  This local project does not use a cluster of Eureka servers. If a cluster were
+  added later, peers could fetch data from one another; that is unnecessary now.
+
+Line 6
+  eureka.instance.hostname=localhost
+
+  Publishes the registry host as `localhost` for the single-machine setup.
+  Other local ARFOMS services can therefore use a stable address.
+
+Line 8
+  # Faster eviction of dead instances for local development.
+
+  Comment for developers. Lines 9 and 10 make stale registrations disappear
+  sooner after a service is stopped during local testing.
+
+Line 9
+  eureka.server.enable-self-preservation=false
+
+  Disables Eureka's self-preservation mode.
+
+  Normally, Eureka avoids removing instances if it suspects a network problem.
+  For local ARFOMS development, a stopped service is usually truly stopped, so
+  disabling this mode gives a more accurate registry during testing.
+
+Line 10
+  eureka.server.eviction-interval-timer-in-ms=15000
+
+  Tells Eureka to check for expired/stale registrations every 15,000 ms
+  (15 seconds).
+
+  Example:
+  If Flight Service is force-stopped, it stops sending heartbeats. Eureka checks
+  regularly and removes the stale `flight-service` entry. This prevents clients
+  from being directed to a dead instance for too long in local development.
+
+
+7. BUILD CONFIGURATION: pom.xml
+-------------------------------
+
+Path:
+  discovery-server/pom.xml
+
+This file is not under `src`, but its dependencies are required by the Java
+code. Maven reads it before the application can be built and run.
+
+Meaningful lines/configuration:
+
+  <project ...>
+    Starts the Maven project definition and supplies the XML namespaces Maven
+    uses to validate the POM format.
+
+  <modelVersion>4.0.0</modelVersion>
+    States the Maven POM model format.
+
+  <parent>
+      <groupId>com.genc.arfoms</groupId>
+      <artifactId>arfoms-microservices</artifactId>
+      <version>1.0.0</version>
+      <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    Inherits shared ARFOMS Maven versions/configuration from the root project
+    POM one directory above this module. This avoids repeating Spring Boot and
+    Spring Cloud version choices in each service module.
+
+  <artifactId>discovery-server</artifactId>
+    Gives this module's build artifact the name `discovery-server`.
+
+  <description>Netflix Eureka service registry for ARFOMS microservices</description>
+    Documents the module's job for Maven users and IDEs.
+
+  <dependency>
+      <groupId>org.springframework.cloud</groupId>
+      <artifactId>spring-cloud-starter-netflix-eureka-server</artifactId>
+    </dependency>
+
+    Provides the Eureka Server library used by @EnableEurekaServer. This is the
+    dependency that gives this application its registry endpoints/UI behaviour.
+
+  <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    Provides testing libraries only. `test` scope means these libraries are not
+    included as normal runtime dependencies in the final application JAR.
+
+  <plugin>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-maven-plugin</artifactId>
+    </plugin>
+
+    Lets Maven package Discovery Server as a runnable Spring Boot JAR.
+
+
+8. COMPLETE REQUEST/REGISTRATION EXAMPLE
+-----------------------------------------
+
+Assume a user searches for a flight in the frontend.
+
+  1. Frontend sends a request to API Gateway at port 8210.
+  2. Gateway forwards the request to Flight Service.
+  3. Flight Service had already registered its service name and address with
+     Discovery Server.
+  4. Booking Service later needs flight details during reservation.
+  5. Booking's OpenFeign client uses the name `flight-service`.
+  6. Eureka/Discovery Server supplies the active Flight Service address.
+  7. Booking calls Flight Service and continues the reservation workflow.
+
+Discovery Server is not directly responsible for searching flights or storing
+bookings. Its job is to make the connection between those services reliable
+and name-based.
+
+
+9. KEY POINTS TO REMEMBER
+-------------------------
+
+  - Discovery Server is the ARFOMS service registry/address book.
+  - It runs Eureka on port 8761.
+  - @EnableEurekaServer is the annotation that activates registry behaviour.
+  - `main` starts Spring, loads central settings, and launches Eureka.
+  - Config Server must start first because Discovery Server imports its config.
+  - Business services register under names like `flight-service`.
+  - Booking and other clients can locate services by name rather than fixed IPs.
+  - Local settings remove stopped services quickly so the development registry
+    stays accurate.

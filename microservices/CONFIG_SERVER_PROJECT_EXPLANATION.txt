@@ -1,0 +1,718 @@
+ARFOMS CONFIG SERVER - EASY PROJECT EXPLANATION
+================================================
+
+This document explains only the `config-server` module in this project.
+It explains what the service is, why ARFOMS needs it, how it works with the
+other services, and the code/configuration inside its `src/main` folder.
+
+Important: configuration contains database credentials. This guide names the
+settings but intentionally does not repeat password values. Do not commit real
+production credentials to source files; use environment variables or a secret
+manager in a production deployment.
+
+
+1. WHAT IS CONFIG SERVER?
+-------------------------
+
+Config Server is a small Spring Boot application that stores and serves shared
+configuration for the microservices.
+
+In ARFOMS, configuration means values such as:
+
+  - which port a service should start on
+  - where Eureka/Discovery Server is running
+  - how a service connects to MySQL
+  - which routes API Gateway forwards to each service
+  - service-to-service base URLs such as `http://flight-service`
+
+Without Config Server, the same values would have to be copied into Auth,
+Flight, Booking, Gateway, Check-in, Crew, and Loyalty services. Changing a
+value would then mean changing many files. With Config Server, each service
+has a central configuration file with its name.
+
+
+2. WHY IS IT USED IN THIS PROJECT?
+----------------------------------
+
+ARFOMS is an airline system split into multiple services. These services must
+agree on ports, database settings, and service-discovery settings.
+
+Config Server gives the project one place to manage those values.
+
+Example:
+
+  Flight Service starts with the name `flight-service`.
+  It imports configuration from http://localhost:8888.
+  Config Server finds config/flight-service.properties.
+  Flight Service receives port 8181, MySQL settings, and Eureka settings.
+
+The same pattern is used by Auth Service, Booking Service, API Gateway,
+Discovery Server, Check-in Service, Crew Service, and Loyalty Service.
+
+This is useful because:
+
+  1. Consistency: every service uses the same MySQL schema and Eureka server.
+  2. Easier maintenance: change a port or route in one central file.
+  3. Clear separation: business code does not contain deployment settings.
+  4. Scalability: in a later deployment, the local URLs can be replaced with
+     environment-specific values without changing service Java code.
+
+
+3. WHERE CONFIG SERVER FITS IN THE ARFOMS FLOW
+------------------------------------------------
+
+  Step 1: Start Config Server on port 8888.
+  Step 2: Start Discovery Server. It asks Config Server for
+          `discovery-server.properties`.
+  Step 3: Start API Gateway, Auth, Flight, Booking, and other services.
+          Each asks Config Server for its matching properties file.
+  Step 4: Each business service registers itself in Discovery Server (Eureka).
+  Step 5: API Gateway and service-to-service clients can find services and
+          handle airline requests.
+
+Visual picture:
+
+  Flight Service ------\
+  Booking Service ------> Config Server :8888 --> configuration files
+  Auth Service ---------/
+  API Gateway ---------/
+
+  The same services then register with:
+
+  Config Server / Business Services --> Discovery Server :8761
+
+
+4. HOW A SERVICE REQUESTS ITS CONFIGURATION
+--------------------------------------------
+
+Every client service has a small local application.properties file similar to:
+
+  spring.application.name=flight-service
+  spring.config.import=optional:configserver:http://localhost:8888
+
+Meaning:
+
+  `spring.application.name` tells Config Server which file to look for.
+  `spring.config.import` tells Spring where Config Server is.
+  `optional:` means the client is allowed to start if Config Server is down.
+  This is convenient for local development, but it can hide a configuration
+  problem because central port/database/Eureka values will not be loaded.
+
+For a normal local run, start Config Server first, then Discovery Server, then
+the remaining services.
+
+
+5. SOURCE CODE: ConfigServerApplication.java
+---------------------------------------------
+
+Path:
+  config-server/src/main/java/com/genc/arfoms/configserver/
+  ConfigServerApplication.java
+
+Full code with line-by-line explanation:
+
+Line 1
+  package com.genc.arfoms.configserver;
+
+  This places the class in the `com.genc.arfoms.configserver` Java package.
+  Spring Boot scans this package and its child packages for components. This
+  class is the starting point of the Config Server application.
+
+Line 2
+  [blank line]
+
+  The blank line only makes the file easier to read. It has no runtime effect.
+
+Line 3
+  import org.springframework.boot.SpringApplication;
+
+  Imports SpringApplication. The `main` method uses it to create Spring's
+  application context and start the embedded web server.
+
+Line 4
+  import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+  Imports the main Spring Boot annotation. This annotation enables automatic
+  setup, component scanning, and Java-based configuration for this process.
+
+Line 5
+  import org.springframework.cloud.config.server.EnableConfigServer;
+
+  Imports the annotation that adds Spring Cloud Config Server behaviour. This
+  is the most important Config Server-specific import in the file.
+
+Line 6
+  import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
+
+  Imports the annotation that allows this application to act as a discovery
+  client. In this project Config Server can register itself in Eureka, making
+  the infrastructure service visible in the service registry.
+
+Line 7
+  [blank line]
+
+  Separation between imports and class annotations; no runtime effect.
+
+Line 8
+  @SpringBootApplication
+
+  This says: "This is a Spring Boot application."
+
+  It combines three common Spring features:
+
+  - @Configuration: this class can provide Spring configuration.
+  - @EnableAutoConfiguration: Spring Boot configures known libraries for us.
+  - @ComponentScan: Spring searches this package for Spring components.
+
+  Why ARFOMS needs it: without this annotation, this Java class would not
+  start as a Spring Boot web application.
+
+Line 9
+  @EnableConfigServer
+
+  This says: "Turn this Spring Boot app into a Config Server."
+
+  It adds endpoints that client services use to request configuration. For
+  example, when Flight Service identifies itself as `flight-service`, this
+  annotation makes Spring Cloud serve the matching configuration from
+  `src/main/resources/config/flight-service.properties`.
+
+  Why ARFOMS needs it: this is what turns a normal web application into the
+  central configuration provider for all ARFOMS services.
+
+Line 10
+  @EnableDiscoveryClient
+
+  This enables the Eureka discovery client integration. Config Server can
+  register with Discovery Server at `http://localhost:8761/eureka/`.
+
+  Why it is useful here: infrastructure services are easier to observe when
+  they appear in the same Eureka registry as the application services. Note
+  that Config Server must still start before Discovery Server in this local
+  setup, because Discovery Server itself imports its configuration from it.
+
+Line 11
+  public class ConfigServerApplication {
+
+  Declares the public Java class. The class name is used below when Spring Boot
+  starts the application. `public` lets the JVM and Maven's Spring Boot plugin
+  access the class.
+
+Line 12
+      public static void main(String[] args) {
+
+  This is Java's entry point. When you run the Config Server JAR or run this
+  class from an IDE, the JVM begins here.
+
+  `public`: JVM can call it.
+  `static`: JVM calls it without creating a ConfigServerApplication object.
+  `void`: it does not return a value.
+  `String[] args`: accepts optional command-line values.
+
+Line 13
+          SpringApplication.run(ConfigServerApplication.class, args);
+
+  This actually starts the service.
+
+  It creates the Spring ApplicationContext, reads application.yml, applies
+  @SpringBootApplication, applies @EnableConfigServer, starts the embedded
+  HTTP server on port 8888, and begins serving configuration to client apps.
+
+  `ConfigServerApplication.class` tells Spring which class is the primary
+  configuration source. `args` passes command-line arguments through to Spring.
+
+Line 14
+      }
+
+  Ends the `main` method. It is a Java structural brace only.
+
+Line 15
+  }
+
+  Ends the ConfigServerApplication class. It is a Java structural brace only.
+
+
+6. BOOTSTRAP CONFIGURATION: application.yml
+-------------------------------------------
+
+Path:
+  config-server/src/main/resources/application.yml
+
+This file is local to Config Server. Config Server must know its own port and
+where its configuration files live before it can serve configuration to others.
+
+Line 1
+  server:
+
+  Starts the YAML `server` section. YAML nesting is determined by indentation.
+  Values below this line describe the embedded HTTP server.
+
+Line 2
+    port: 8888
+
+  Runs Config Server at port 8888. Client services import configuration from
+  `http://localhost:8888`, so this number must match their import URL.
+
+Line 3
+  [blank line]
+
+  Readability only; no runtime effect.
+
+Line 4
+  spring:
+
+  Starts the main Spring configuration section.
+
+Line 5
+    application:
+
+  Starts the subsection for the Spring application identity.
+
+Line 6
+      name: config-server
+
+  Gives this process the logical name `config-server`. The name appears in
+  logs and Eureka registration. It also distinguishes this service from Auth,
+  Flight, Booking, and Gateway services.
+
+Line 7
+    profiles:
+
+  Starts the Spring profile subsection.
+
+Line 8
+      active: native
+
+  Activates Config Server's `native` profile. `native` means configuration is
+  read from files bundled on this application's classpath, not from Git, Vault,
+  or a remote repository.
+
+  Why it is used here: the project is designed for simple local development;
+  all service property files are kept inside this repository.
+
+Line 9
+    cloud:
+
+  Starts Spring Cloud settings.
+
+Line 10
+      config:
+
+  Starts the Spring Cloud Config settings.
+
+Line 11
+        server:
+
+  Starts settings specific to the server side of Spring Cloud Config.
+
+Line 12
+          native:
+
+  Starts settings for the `native` (local file) configuration backend.
+
+Line 13
+            search-locations: classpath:/config/
+
+  Tells Config Server to search `src/main/resources/config/` after resources
+  are placed on the application classpath.
+
+  Example: a request for `booking-service` leads to the file
+  `classpath:/config/booking-service.properties`.
+
+Line 14
+  [blank line]
+
+  Readability only; no runtime effect.
+
+Line 15
+  eureka:
+
+  Starts Eureka client configuration.
+
+Line 16
+    client:
+
+  Starts settings for this application's Eureka client.
+
+Line 17
+      service-url:
+
+  Starts the map of Eureka server URLs.
+
+Line 18
+        defaultZone: http://localhost:8761/eureka/
+
+  Gives the URL of Discovery Server/Eureka. When Eureka is available, Config
+  Server can register there. The final `/eureka/` is the Eureka REST endpoint.
+
+
+7. CENTRAL CONFIGURATION FILES
+------------------------------
+
+Directory:
+  config-server/src/main/resources/config/
+
+Rule used by Config Server:
+
+  application name `X`  -->  file `config/X.properties`
+
+The following sections explain what every file gives to the corresponding
+ARFOMS service. Repeated database/Eureka settings have the same meaning across
+services, so their meaning is explained once and then applied to each file.
+
+
+7.1 Shared database settings used by business services
+------------------------------------------------------
+
+The Auth, Flight, Booking, Check-in, Crew, and Loyalty files contain these
+types of settings:
+
+  server.port=<number>
+    Starts that specific microservice on its own HTTP port.
+
+  spring.datasource.url=jdbc:mysql://localhost:3306/microAir_db?...
+    JDBC connection address for the shared local MySQL database `microAir_db`.
+    `createDatabaseIfNotExist=true` permits local MySQL to create the database.
+    `useSSL=false`, `allowPublicKeyRetrieval=true`, and `serverTimezone=UTC`
+    are MySQL connection options for the local setup.
+
+  spring.datasource.username=root
+  spring.datasource.password=<redacted>
+  spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
+    Supplies database login and selects the MySQL JDBC driver.
+
+  spring.jpa.hibernate.ddl-auto=update
+    Hibernate updates tables to match JPA entities. Convenient in development;
+    production systems normally use versioned migrations instead.
+
+  spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.MySQLDialect
+    Tells Hibernate to generate MySQL-compatible SQL.
+
+  spring.jpa.open-in-view=false
+    Prevents database persistence contexts from remaining open during the web
+    response. This encourages service code to load required data explicitly.
+
+  eureka.client.service-url.defaultZone=http://localhost:8761/eureka/
+    Tells the service where to register and where to discover other services.
+
+  eureka.instance.hostname=localhost
+  eureka.instance.prefer-ip-address=false
+    Makes the local service register as localhost instead of a changing Wi-Fi
+    or Ethernet IP address. This avoids gateway calls pointing at stale LAN IPs.
+
+
+7.2 discovery-server.properties
+--------------------------------
+
+Purpose: configuration for Eureka itself. Discovery Server is the directory
+that stores running service names and locations.
+
+  server.port=8761
+    Starts Eureka/Discovery Server at port 8761.
+
+  eureka.client.register-with-eureka=false
+    Discovery Server does not register itself as a normal client. It is the
+    registry, not an application that needs to be discovered.
+
+  eureka.client.fetch-registry=false
+    Discovery Server does not fetch a registry from itself in this standalone
+    local setup.
+
+  eureka.instance.hostname=localhost
+    Publishes localhost as the registry host for local development.
+
+  eureka.server.enable-self-preservation=false
+    Turns off Eureka's conservative self-preservation mode. For local work,
+    this makes dead services disappear from the registry sooner.
+
+  eureka.server.eviction-interval-timer-in-ms=15000
+    Eureka checks for stale service registrations every 15 seconds.
+
+
+7.3 auth-service.properties
+----------------------------
+
+Purpose: configuration for login, registration, user storage, and JWT issuing.
+
+  server.port=8180
+    Auth Service listens at port 8180. Gateway route `/api/auth/**` forwards
+    browser authentication requests to this port.
+
+  Eureka settings
+    Register Auth Service so the project can see it as `auth-service`.
+
+  MySQL/JPA settings
+    Store users and their password hashes in `microAir_db`.
+
+  admin.username=admin
+  admin.password=<redacted>
+  admin.name=Administrator
+  admin.role=Admin
+    Default user values for local initialization. DataInitializer uses the
+    administrator values to make a development login available.
+
+
+7.4 flight-service.properties
+------------------------------
+
+Purpose: configuration for schedules, fares, airport data, and seat inventory.
+
+  server.port=8181
+    Flight Service listens at port 8181. Gateway path `/api/flights/**` is
+    forwarded to this service.
+
+  MySQL/JPA settings
+    Persist Flight and SeatInventory records in `microAir_db`.
+
+  Eureka settings
+    Register as `flight-service`. Booking, Check-in, Crew, and Loyalty use
+    this identity when they need flight information.
+
+  Comments about `prefer-ip-address=false`
+    Explain a real local-development issue: using LAN IPs can create stale
+    Eureka entries after changing from Wi-Fi to Ethernet. localhost is stable.
+
+
+7.5 booking-service.properties
+-------------------------------
+
+Purpose: configuration for reservations, passengers, payments, and seats.
+
+  server.port=8182
+    Booking Service listens at port 8182. Gateway path `/api/bookings/**`
+    reaches this service. Some `/flights/**` and `/airline/**` routes also
+    reach it for compatibility with the frontend.
+
+  MySQL/JPA settings
+    Persist Booking, Passenger, Payment, and booking-side SeatInventory data.
+
+  arfoms.flight-service.base-url=http://flight-service
+    This is not a physical host name. It is the Eureka service ID. Spring
+    Cloud/OpenFeign resolves `flight-service` to the currently registered
+    Flight Service instance. Booking uses it to validate or obtain flight data.
+
+  Eureka settings
+    Allow Booking Service to register and to resolve Flight Service by name.
+
+
+7.6 checkin-service.properties
+-------------------------------
+
+Purpose: configuration for check-in and boarding pass work.
+
+  server.port=8193
+    Check-in Service listens at port 8193; Gateway forwards `/api/checkin/**`.
+
+  MySQL/JPA settings
+    Persist CheckIn information.
+
+  arfoms.booking-service.base-url=http://booking-service
+    Check-in resolves Booking Service through Eureka to verify booking status.
+
+  arfoms.flight-service.base-url=http://flight-service
+    Check-in resolves Flight Service through Eureka to obtain flight details.
+
+  Eureka settings
+    Register the service and enable those name-based calls.
+
+
+7.7 crew-service.properties
+----------------------------
+
+Purpose: configuration for crew assignment and roster operations.
+
+  server.port=8184
+    Crew Service listens at port 8184; Gateway forwards `/api/crew/**`.
+
+  server.error.include-message=always
+    Includes exception messages in error responses. Helpful in development,
+    but production applications should avoid exposing internal details.
+
+  MySQL/JPA settings
+    Persist crew-assignment data.
+
+  arfoms.flight-service.base-url=http://flight-service
+    Crew Service resolves Flight Service through Eureka to connect crew work
+    with flight schedules.
+
+  Eureka settings
+    Enable registration and name-based discovery.
+
+
+7.8 loyalty-service.properties
+-------------------------------
+
+Purpose: configuration for frequent-flyer accounts, offers, and flight credit.
+
+  server.port=8185
+    Loyalty Service listens at port 8185; Gateway forwards `/api/loyalty/**`.
+
+  MySQL/JPA settings
+    Persist frequent-flyer/member data.
+
+  arfoms.flight-service.base-url=http://flight-service
+    Loyalty Service resolves Flight Service through Eureka to obtain distance
+    information when crediting a member for a flight.
+
+  Eureka settings
+    Enable registration and discovery.
+
+
+7.9 api-gateway.properties
+---------------------------
+
+Purpose: configures the single frontend-facing entry point.
+
+  server.port=8210
+    API Gateway accepts browser requests on port 8210.
+
+  Eureka settings
+    Register Gateway with Eureka. The current routes use explicit local URLs,
+    but Eureka registration still provides a common service directory.
+
+Gateway route rule pattern:
+
+  spring.cloud.gateway.server.webflux.routes[N].id=<route name>
+    A human-readable unique name for one Gateway route.
+
+  spring.cloud.gateway.server.webflux.routes[N].uri=http://localhost:<port>
+    The destination service address in the local project.
+
+  spring.cloud.gateway.server.webflux.routes[N].predicates[0]=Path=<path>
+    Requests whose path matches this pattern are forwarded to that destination.
+
+Actual routes in this project:
+
+  Route 0: id=auth-service
+    uri=http://localhost:8180
+    Path=/api/auth/**
+    Login and registration requests go to Auth Service.
+
+  Route 1: id=flight-service
+    uri=http://localhost:8181
+    Path=/api/flights/**
+    Flight search, schedule, fare, and metadata requests go to Flight Service.
+
+  Route 2: id=booking-service
+    uri=http://localhost:8182
+    Path=/api/bookings/**
+    Reservation, passenger, payment, and seat requests go to Booking Service.
+
+  Route 3: id=checkin-service
+    uri=http://localhost:8193
+    Path=/api/checkin/**
+    Check-in and boarding-pass requests go to Check-in Service.
+
+  Route 4: id=crew-service
+    uri=http://localhost:8184
+    Path=/api/crew/**
+    Crew roster requests go to Crew Service.
+
+  Route 5: id=loyalty-service
+    uri=http://localhost:8185
+    Path=/api/loyalty/**
+    Frequent-flyer requests go to Loyalty Service.
+
+  Route 6: id=booking-service-flights
+    uri=http://localhost:8182
+    Path=/flights/**
+    Compatibility route: some frontend flight paths are handled by Booking
+    Service rather than the normal `/api/flights/**` Flight Service route.
+
+  Route 7: id=booking-service-airline
+    uri=http://localhost:8182
+    Path=/airline/**
+    Compatibility route for existing airline frontend paths.
+
+  spring.cloud.gateway.server.webflux.default-filters[0]=
+  DedupeResponseHeader=Access-Control-Allow-Origin
+  Access-Control-Allow-Credentials RETAIN_FIRST
+
+    Removes duplicate CORS response headers so browsers receive one valid
+    value rather than conflicting duplicate headers.
+
+  spring.cloud.gateway.server.webflux.globalcors.
+  add-to-simple-url-handler-mapping=true
+
+    Lets Gateway apply CORS settings to simple URL-handler mappings too,
+    including browser preflight handling.
+
+  allowedOrigins[0] through allowedOrigins[8]
+    Allows local frontend/dev-server origins: ports 5500, 5600, 8000, 8210,
+    and IntelliJ's 63342, using both localhost and 127.0.0.1 where listed.
+
+  allowedMethods[0] through allowedMethods[5]
+    Permits GET, POST, PUT, DELETE, OPTIONS, and PATCH. These cover reading,
+    creating, updating, deleting, browser preflight, and partial updates.
+
+  allowedHeaders[0]=*
+    Allows the browser to send needed headers, including Authorization.
+
+  allowCredentials=true
+    Allows credentialed cross-origin browser requests. This matters when a
+    frontend sends cookies or authorization-related requests.
+
+
+8. config-server/pom.xml (BUILD FILE)
+--------------------------------------
+
+This is outside `src/main`, but it is required for the source code to work.
+Maven reads it to download dependencies and produce a runnable JAR.
+
+  <parent>
+    Uses the root `arfoms-microservices` Maven parent. The parent provides
+    shared versions and build configuration for the modules.
+
+  <artifactId>config-server</artifactId>
+    Gives this module its Maven artifact name.
+
+  spring-cloud-config-server dependency
+    Provides @EnableConfigServer and the configuration-serving endpoints.
+    Without this dependency, the application class could not be a Config Server.
+
+  spring-boot-starter-web dependency
+    Provides Spring MVC and the embedded HTTP server. Config clients need HTTP
+    endpoints, so this dependency lets Config Server answer their requests.
+
+  spring-cloud-starter-netflix-eureka-client dependency
+    Lets Config Server register with Discovery Server/Eureka.
+
+  spring-boot-maven-plugin
+    Packages the module as a Spring Boot executable JAR that can be run with
+    `java -jar` after Maven builds it.
+
+
+9. SIMPLE REAL-WORLD EXAMPLE
+----------------------------
+
+Suppose the Flight Service port must change from 8181 to 8281.
+
+Without Config Server:
+  You would search across Flight Service, API Gateway, possibly frontend code,
+  documentation, and environment files to change every copy safely.
+
+With the current ARFOMS Config Server:
+  1. Change `server.port=8181` to `server.port=8281` in
+     config/flight-service.properties.
+  2. Change API Gateway route 1 URI from localhost:8181 to localhost:8281 in
+     config/api-gateway.properties.
+  3. Restart Config Server and the affected services.
+
+The business code in FlightServiceImpl, controllers, repositories, and models
+does not need to change. That separation is the main reason Config Server is
+valuable in this project.
+
+
+10. KEY POINTS TO REMEMBER
+--------------------------
+
+  - Config Server is the central settings provider, not a business service.
+  - It starts on port 8888 and reads files from `classpath:/config/`.
+  - A service asks for configuration using its `spring.application.name`.
+  - Discovery Server uses the configuration supplied by Config Server, so
+    Config Server should start first in this local project.
+  - API Gateway routes browser traffic using settings supplied by Config Server.
+  - Booking, Check-in, Crew, and Loyalty use Eureka service IDs such as
+    `http://flight-service` instead of hard-coded Flight Service ports.
+  - Local passwords are configuration, but production passwords should be
+    supplied securely rather than committed to source control.
