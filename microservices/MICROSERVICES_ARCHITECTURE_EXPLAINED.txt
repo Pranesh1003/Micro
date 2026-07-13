@@ -1,0 +1,576 @@
+ARFOMS MICROSERVICES ARCHITECTURE - IMPLEMENTATION AND WORKFLOW GUIDE
+=====================================================================
+
+Scope
+-----
+This guide is based on the source and configuration in this repository. It
+explains the requested services: config-server, discovery-server,
+flight-service, booking-service, auth-service, and api-service.
+
+Important naming note: there is no module named "api-service". The API-service
+role is implemented by the module named `api-gateway`.
+
+1. SYSTEM AT A GLANCE
+----------------------
+
+The application is an Airline Reservation and Flight Operations Management
+System (ARFOMS) split into Spring Boot microservices. The root Maven project
+(`microservices/pom.xml`) is a parent/aggregator project. It uses Java 21,
+Spring Boot 4.0.6 and Spring Cloud 2025.1.0, and builds each service as a
+separate executable Spring Boot application.
+
+Core infrastructure and business flow:
+
+  Browser/frontend
+       |
+       | HTTP requests, normally through port 8210
+       v
+  API Gateway (api-gateway : 8210)
+       |-- /api/auth/**     -> auth-service : 8180
+       |-- /api/flights/**  -> flight-service : 8181
+       |-- /api/bookings/** -> booking-service : 8182
+       |-- /flights/** and /airline/** -> booking-service : 8182
+       v
+  Business services <---- registered in ----> Eureka discovery-server : 8761
+       |
+       |-- obtain shared startup configuration from config-server : 8888
+       |-- use MySQL schema `microAir_db`
+       |
+       `-- booking-service calls flight-service with OpenFeign by service ID
+
+Startup order matters because service configuration and registration depend on
+the two infrastructure services:
+
+  1. config-server (8888)
+  2. discovery-server (8761)
+  3. api-gateway, auth-service, flight-service, booking-service
+
+The clients use `spring.config.import=optional:configserver:http://localhost:8888`.
+`optional:` allows the process to start if Config Server is temporarily absent,
+but its port/database/Eureka settings then will not be supplied from the
+central config files.
+
+2. CONFIG SERVER (config-server, PORT 8888)
+-------------------------------------------
+
+Purpose
+-------
+Config Server centralizes environment properties. Rather than putting every
+port, MySQL setting, Eureka address and gateway route in each service, the
+settings live in `config-server/src/main/resources/config/`.
+
+Implementation, file by file / line by line meaning
+-----------------------------------------------------
+
+`ConfigServerApplication.java`
+  `@SpringBootApplication` enables component scanning, auto-configuration and
+  Spring Boot startup.
+  `@EnableConfigServer` turns this application into a Spring Cloud Config
+  Server. It exposes configuration to client applications by application name.
+  `@EnableDiscoveryClient` lets this infrastructure service register in Eureka
+  after Eureka is available.
+  `SpringApplication.run(...)` creates the application context and starts its
+  embedded web server.
+
+`application.yml`
+  `server.port: 8888` binds the configuration API to port 8888.
+  `spring.application.name: config-server` is the service identity.
+  `spring.profiles.active: native` selects Config Server's native backend,
+  meaning properties are read from local classpath files rather than Git/Vault.
+  `search-locations: classpath:/config/` points the backend to the bundled
+  `resources/config` directory.
+  `eureka.client.service-url.defaultZone` is the Eureka endpoint used when this
+  service registers.
+
+Configuration file lookup
+-------------------------
+Each service sends its `spring.application.name` to Config Server. For example,
+`flight-service` causes Config Server to load `config/flight-service.properties`.
+The matching central configuration files are:
+
+  discovery-server.properties  - Registry-specific settings.
+  api-gateway.properties        - Port, routes, CORS and Eureka settings.
+  auth-service.properties       - Port, MySQL, Eureka and default user values.
+  flight-service.properties     - Port, MySQL and Eureka settings.
+  booking-service.properties    - Port, MySQL, Eureka and the Flight service URL.
+
+Where it is used
+----------------
+Every requested service has a small local `application.properties` file that
+sets its name and imports Config Server. This is the central source of runtime
+configuration for the entire requested architecture.
+
+3. DISCOVERY SERVER (discovery-server, PORT 8761)
+--------------------------------------------------
+
+Purpose
+-------
+Discovery Server is the service registry. It maintains a list of running
+service instances under names such as `FLIGHT-SERVICE` and `BOOKING-SERVICE`.
+This avoids hard-coding service locations for service-to-service clients and
+supports multiple instances when introduced later.
+
+Implementation
+--------------
+
+`DiscoveryServerApplication.java`
+  The class comment accurately states its intent: services register here and
+  clients can discover an instance by service ID rather than host and port.
+  `@EnableEurekaServer` activates the Netflix Eureka Server endpoints/UI.
+  `@SpringBootApplication` provides normal Spring Boot application behavior.
+  `SpringApplication.run(...)` launches the registry.
+
+`discovery-server/pom.xml`
+  `spring-cloud-starter-netflix-eureka-server` supplies the Eureka server.
+  `spring-boot-starter-test` is included only for tests.
+
+`discovery-server/application.properties`
+  `spring.application.name=discovery-server` is the Config Server lookup name.
+  `spring.config.import=optional:configserver:http://localhost:8888` requests
+  `discovery-server.properties` from Config Server.
+
+Central `config/discovery-server.properties`
+  `server.port=8761` sets the registry port.
+  `register-with-eureka=false` prevents this standalone registry from trying to
+  register itself as a client.
+  `fetch-registry=false` prevents it from fetching its own registry.
+  `eureka.instance.hostname=localhost` makes the local development address
+  stable.
+  `enable-self-preservation=false` makes local dead-instance eviction faster.
+  `eviction-interval-timer-in-ms=15000` performs that eviction check every 15s.
+
+Where it is used
+----------------
+Config Server, Auth Service, Flight Service, Booking Service and API Gateway
+all contain a Eureka client dependency and/or an `eureka.client.service-url`
+property. Booking's `@FeignClient(name="flight-service")` resolves this name
+through Eureka and Spring Cloud LoadBalancer.
+
+4. API SERVICE = API GATEWAY (api-gateway, PORT 8210)
+-----------------------------------------------------
+
+Purpose
+-------
+API Gateway is the single browser-facing ingress. A frontend calls port 8210
+instead of needing to know each service's private port. It uses Spring Cloud
+Gateway WebFlux to route requests and adds cross-origin (CORS) support for the
+locally served frontend.
+
+Implementation
+--------------
+
+`ApiGatewayApplication.java`
+  `@SpringBootApplication` creates the reactive Gateway application.
+  `SpringApplication.run(...)` starts the WebFlux gateway server.
+
+`api-gateway/pom.xml`
+  `spring-cloud-starter-gateway-server-webflux` is the reactive routing engine.
+  `spring-cloud-starter-netflix-eureka-client` registers/discovers services.
+  The dependency-management block pins Spring Security artifacts to locally
+  cached versions; the gateway itself does not declare a custom JWT filter.
+
+`api-gateway/application.properties`
+  `spring.application.name=api-gateway` controls central config lookup.
+  `spring.config.import=optional:configserver:http://localhost:8888` imports
+  gateway configuration.
+  `spring.cloud.openfeign.okhttp.enabled=true` enables the OkHttp Feign option;
+  this is not essential to the gateway's own WebFlux routes.
+
+Central `config/api-gateway.properties`, route by route
+-------------------------------------------------------
+  `server.port=8210` exposes the gateway at http://localhost:8210.
+  The Eureka URL/hostname/prefer-IP lines connect the gateway to the registry
+  and register it as localhost.
+  Route 0 maps `Path=/api/auth/**` to `http://localhost:8180` (Auth Service).
+  Route 1 maps `Path=/api/flights/**` to `http://localhost:8181` (Flight).
+  Route 2 maps `Path=/api/bookings/**` to `http://localhost:8182` (Booking).
+  Route 3 maps `/api/checkin/**` to CheckIn service (8193).
+  Route 4 maps `/api/crew/**` to Crew service (8184).
+  Route 5 maps `/api/loyalty/**` to Loyalty service (8185).
+  Route 6 maps `/flights/**` to Booking service (8182), supporting the
+  reservation frontend's older/browser-friendly paths.
+  Route 7 maps `/airline/**` to Booking service (8182), including seat data.
+  The route URIs are literal localhost URLs. Therefore the current routing
+  configuration does not use `lb://service-name`, despite Eureka being enabled.
+  `DedupeResponseHeader` removes duplicate CORS response header values.
+  `globalcors` settings allow listed localhost/127.0.0.1 frontend origins,
+  methods GET/POST/PUT/DELETE/OPTIONS/PATCH, any header, and credentials.
+
+Where it is used
+----------------
+Use it as the normal external base URL:
+  http://localhost:8210/api/auth/login
+  http://localhost:8210/api/flights/search
+  http://localhost:8210/api/bookings
+  http://localhost:8210/flights/search
+  http://localhost:8210/airline/api/seats
+
+5. AUTH SERVICE (auth-service, PORT 8180)
+-----------------------------------------
+
+Purpose
+-------
+Auth Service stores users and authenticates them. On successful login it
+returns an HS256-signed JWT containing the username (subject) and role claim.
+The other business services independently validate the same token using the
+same configured/default secret.
+
+Implementation
+--------------
+
+`AuthApplication.java`
+  `@SpringBootApplication` starts the servlet-based service.
+  `@EnableDiscoveryClient` registers it with Eureka.
+
+`auth-service/pom.xml`
+  Web provides REST controller support.
+  Data JPA + MySQL Connector persist `User` records.
+  Spring Security provides stateless request authorization.
+  JJWT API/implementation/Jackson provide JWT creation and parsing.
+  Log4j2 replaces Spring Boot's default logging starter.
+
+`User.java`
+  `@Entity` maps this class to the `users` table.
+  `id` is an identity-generated primary key.
+  `username` is required and unique.
+  `password`, `name`, and `role` are all required columns.
+  The no-argument constructor is required by JPA; the second constructor
+  creates a user from its four business fields.
+  Getters/setters are persistence and JSON binding accessors.
+
+`UserRepository.java`
+  Extends `JpaRepository<User, Long>` for standard CRUD operations.
+  `findByUsername` is Spring Data's derived query used by registration, login,
+  and seed data updates.
+
+`DataInitializer.java`
+  Implements `CommandLineRunner`, so it runs at each service startup.
+  It upserts default users: admin, scheduler, agent, crew, loyalty and
+  groundstaff. Existing users with these names have their password/name/role
+  overwritten to the listed seed values.
+
+`AuthController.java`, endpoint by endpoint
+  `@RequestMapping("/api/auth")` is the controller base path.
+  POST `/login` receives a JSON map with `username` and `password`.
+  It rejects missing fields, finds the user, and compares the supplied password
+  directly with the stored password. On success it returns `token`, `role`,
+  and `name`; otherwise it throws `PasswordIncorrectException` (401).
+  POST `/register` accepts a `User` JSON object. It requires username,
+  password, role and name; rejects duplicate usernames (409); lowercases and
+  validates the role against six permitted roles; then saves the user (201).
+  GET `/validate?token=...` parses the token and returns `Token is valid` if
+  signature/format/expiry validation succeeds.
+
+`JwtUtils.java`
+  `jwt.secret` has a source-default HMAC key and `jwt.expiration` defaults to
+  86,400,000 ms (24 hours). These settings may be overridden externally.
+  `generateToken` adds `role`, sets the subject to username, timestamps the
+  token, sets expiry, signs it with HS256, and compacts it to JWT text.
+  `getUsernameFromToken` reads the subject; `getRoleFromToken` reads role.
+  `validateToken(token, username)` checks that the subject matches username.
+  `validateToken(token)` parses the signed JWS and thus checks signature/expiry.
+
+`SecurityConfig.java`
+  Disables CSRF because this is a stateless token API rather than browser form
+  sessions.
+  Permits OPTIONS, login, register, validate, and `/error` without a token.
+  Requires an authenticated request for all remaining paths.
+  Sets `SessionCreationPolicy.STATELESS`, disables form login, installs the JWT
+  filter before username/password authentication, and configures localhost CORS.
+
+`JwtRequestFilter.java`
+  Runs once per request and lets preflight OPTIONS pass through.
+  Reads `Authorization: Bearer <JWT>`; for compatibility it also accepts an
+  `access_token` query parameter.
+  Parses username and role, validates the token, then puts an authenticated
+  principal and normalized `ROLE_<ROLE>` authority into Spring Security's
+  context. Invalid tokens are logged and do not create authentication.
+
+`GlobalExceptionHandler.java` maps duplicate username to 409, invalid password
+to 401, invalid arguments to 400, absent elements to 404, invalid state to 409,
+and unexpected errors to 500 using the common `ResponseData` envelope.
+
+Central configuration
+---------------------
+`auth-service.properties` sets port 8180; points Eureka to port 8761; configures
+MySQL URL `microAir_db`, root user, `Root@123` password, driver and Hibernate
+`ddl-auto=update`; disables Open Session in View; and declares admin defaults.
+Note: passwords are compared and stored as plain text in the current code.
+
+6. FLIGHT SERVICE (flight-service, PORT 8181)
+----------------------------------------------
+
+Purpose
+-------
+Flight Service owns flight schedule/fare information and creates a seat
+inventory when a new flight is created. It supports public flight browsing and
+searching; schedule/fare mutations require a valid JWT.
+
+Implementation
+--------------
+
+`FlightServiceApplication.java` is the standard Spring Boot startup class.
+
+`flight-service/pom.xml` supplies Web REST APIs, Bean Validation, JPA/MySQL,
+Eureka client, Spring Security, JJWT, Log4j2, Lombok and test dependencies.
+
+`FlightController.java`, endpoint by endpoint
+  GET `/api/flights` returns all Flight rows.
+  GET `/api/flights/id/{flightId}` gets a Flight by numeric ID; missing ID gives
+  a 404 `FlightException`.
+  GET `/api/flights/{flightNumber}` gets a Flight by flight number.
+  POST `/api/flights` converts `FlightRequest` into an entity, adds it, and
+  returns the persisted flight with 201 Created.
+  PUT/PATCH `/{flightIdentifier}/schedule` finds a flight by numeric ID or
+  flight number, changes departure/arrival/status, then returns the result.
+  PUT/PATCH `/{flightIdentifier}/fares` or `/fare-class` updates three fares.
+  DELETE `/{flightIdentifier}` deletes flight inventory first, then the flight.
+  POST `/api/flights/search` filters by origin, destination, departure date,
+  flight type and passenger input (the service method mainly uses route/date/type).
+  GET `/api/flights/metadata` returns statuses plus domestic/international
+  airport catalogues for frontend form controls.
+
+`FlightServiceImpl.java`, business implementation
+  The service is `@Service` and `@Transactional`; writes occur transactionally.
+  It contains valid airport codes and latitude/longitude data. This lets it
+  validate origin/destination and calculate route mileage without an external
+  map service.
+  `addFlight` validates the new flight, normalizes airport codes/date-times,
+  rejects a past departure or invalid time ordering, calculates distance,
+  supplies SCHEDULED status if absent, requires and validates all three fares,
+  rejects duplicate flight numbers, saves the flight, and creates seats.
+  `createSeatInventory` uses `seatRows` and `seatColumns` to generate labels
+  such as A1, A2, etc., each initially `AVAILABLE`.
+  `seedSeatInventoryIfRequested` is a startup helper activated only with JVM
+  `-Dseed.seats=true`; it can seed one selected flight if inventory is missing.
+  `deleteFlight` removes associated seat records before deleting the flight.
+  `updateSchedule` normalizes nonblank changes, validates schedule order and
+  recalculates route distance.
+  `setFares` validates economy/premium/first values and keeps legacy `fare`
+  equal to economy fare.
+  `searchAvailableFlights` canonicalizes city/IATA input, filters flights by
+  route/date/type, de-duplicates flight numbers, sets airline display name and
+  attaches available-seat count from local seat inventory (or declared capacity).
+  `findByFlightNumberOrId` supports either a numeric ID or case-insensitive
+  flight number, which makes update/delete paths flexible.
+
+`AirportDistanceService.java`
+  Is a self-contained Haversine great-circle distance calculator using a second
+  small airport coordinate registry. It returns miles rounded to one decimal.
+  In the inspected `FlightServiceImpl`, distance calculation is also performed
+  using its internal coordinate map; this separate service is available but is
+  not injected into that implementation.
+
+Repositories and models
+-----------------------
+  `FlightRepository` is JPA CRUD plus case-insensitive flight-number lookup.
+  `SeatInventoryRepository` uses JPQL queries to obtain a flight's seats,
+  sorted seats, seats by status, or one named seat.
+  `Flight` is the persisted flight aggregate (ID/number/route/times/status,
+  fares, capacity/layout and distance fields). `SeatInventory` persists each
+  seat. `SeatStatus` represents availability. Airport/status enums and DTOs
+  support validation and API payloads.
+
+Security and configuration
+--------------------------
+Flight's `SecurityConfig` permits GET `/api/flights` and its subpaths plus POST
+`/api/flights/search`, so browsing/searching is public. All other changes need
+JWT authentication. Its JWT filter and JWT utility use the same Bearer-token
+flow and source-default secret as Auth Service. Central properties set port
+8181, MySQL/JPA settings and Eureka localhost registration. The comment about
+`prefer-ip-address=false` documents that localhost avoids stale LAN IP routing.
+
+7. BOOKING SERVICE (booking-service, PORT 8182)
+------------------------------------------------
+
+Purpose
+-------
+Booking Service drives the reservation frontend flow, owns booking/passenger/
+payment records, maintains its seat availability view, and calls Flight Service
+to obtain authoritative flight details. It also contains a simplified mock
+payment/seat-confirmation flow.
+
+Implementation
+--------------
+
+`BookingServiceApplication.java`
+  `@SpringBootApplication` starts the service.
+  `@EnableFeignClients` scans and creates OpenFeign HTTP client proxies.
+
+`booking-service/pom.xml`
+  Web, Validation, JPA, MySQL, Eureka, Security/JJWT, Log4j2 and Lombok support
+  the service. `spring-cloud-starter-openfeign` implements its Flight client.
+
+`FlightClient.java`
+  `@FeignClient(name="flight-service")` tells Feign to resolve Flight Service by
+  service name using Eureka/load balancing.
+  GET `/api/flights/id/{flightId}` fetches one flight.
+  POST `/api/flights/search` calls Flight's search API.
+  GET `/api/flights` fetches all flights.
+
+`FeignClientInterceptor.java`
+  Reads the incoming request's Authorization header and copies it to each
+  outgoing Feign request. This preserves the caller's JWT for protected
+  Flight-Service calls.
+
+`BookingController.java`, endpoint by endpoint
+  GET `/flights` lists available flights for browser-facing reservation pages.
+  POST `/flights/search` searches using a Booking-shaped criteria object.
+  POST `/flights/passenger` prepares a booking draft and passenger slots.
+  GET `/flights/passenger/{passengerId}` retrieves passenger details.
+  POST `/flights/passenger/validate` checks duplicate-passenger constraints.
+  POST `/flights/passenger/confirm` persists a completed Booking.
+  POST `/api/bookings` accepts a lightweight payload (flightId, seatNumber,
+  fareAmount, passengerName), constructs one default passenger, and persists it.
+  GET `/api/bookings/confirmation/{bookingId}` gets confirmation details.
+  GET `/api/bookings/manage` returns the latest booking.
+  GET `/api/bookings` returns bookings newest first.
+  POST `/api/bookings/{bookingId}/modify` updates supplied booking fields.
+  POST `/api/bookings/{bookingId}/cancel` changes status to CANCELLED and
+  releases the selected seat when that seat is locally marked BOOKED.
+
+`SeatPaymentController.java`, endpoint by endpoint
+  GET `/airline/api/seats?flightId=...` returns all seats, booked seat numbers,
+  flight details (via Feign), a selected/first passenger and display-ready time,
+  date and seat-layout fields.
+  GET `/api/payment?flightId=...&seatNumber=...` builds a payment preview.
+  POST `/booking/confirm?flightId=...&seatNumber=...` confirms a seat/payment
+  and returns success/message plus bookingId/seat/amount on success.
+
+`BookingServiceImpl.java`, primary business workflow
+  `searchAvailableFlights` calls `flightClient.getAllFlights()`, filters by
+  canonical origin/destination/date/type, de-duplicates by flight number, then
+  augments each flight with locally counted available seats.
+  `prepareBookingDraft` normalizes requested passenger count to 1..9, ensures
+  that many Passenger objects are present, calculates a display fare and fills
+  default booking values when necessary.
+  `createBooking` is transactional. It validates flight existence through
+  `FlightClient`, normalizes passenger count/details, prevents the same
+  passenger from holding multiple seats on the same flight, invokes the mock
+  payment processor to obtain a random PNR and CONFIRMED status, persists the
+  booking and passengers, and attempts to award the route distance as passenger
+  miles. (The precise flow is spread across helper methods in this class.)
+  Duplicate passenger validation queries passengers on the same `flightId` by
+  matching either passenger ID or email, then throws an invalid-state error.
+  `selectSeat` saves a chosen seat on an existing booking.
+  `modifyBooking` patches only nonblank/nonzero supplied fields, resizes
+  passenger slots if needed and recalculates fare.
+  `cancelBooking` sets CANCELLED and returns a locally booked selected seat to
+  AVAILABLE.
+  `getBookingDetails` returns the latest record, or a hard-coded preview when
+  no booking exists; `getBookingById` similarly falls back to preview.
+  Domestic base fare is 5200 and international base fare is 18500 per passenger.
+
+`SeatPaymentService.java`, seat/payment workflow
+  Reads all/available/booked seats via `SeatInventoryRepository`.
+  `confirmSeatSelection` atomically changes one AVAILABLE seat to BOOKED; it
+  returns false when the seat does not exist or is no longer available.
+  `confirmBooking` validates flight and seat, clears the transient passenger
+  booking reference, reserves the seat, handles an existing payment idempotently
+  if the seat was already booked, builds a payment record, saves it and returns
+  a `BookingResult`.
+  `buildBooking` applies a fixed base fare (18500), taxes (1250), savings (950),
+  and seat surcharge: window columns 1/4 = 700 and aisle 2/3 = 500. It fetches
+  flight data via Feign, formats times, generates a mock PNR and includes it in
+  the payment passenger display string.
+
+`MockPaymentService.java`
+  Does not contact a real payment provider. It produces an eight-character
+  cryptographically random uppercase-alphanumeric PNR and returns CONFIRMED.
+
+`PassengerService.java`
+  Its `getPassenger` method returns the first Passenger table row or null. It
+  is used by the seat/payment endpoints as a simple demo/session substitute.
+
+Repositories and persistence
+----------------------------
+  `BookingRepository`: CRUD, latest booking, all bookings descending, PNR lookup.
+  `PassengerRepository`: CRUD, email lookup and JPQL duplicate-flight check.
+  `SeatInventoryRepository`: JPQL seat queries keyed by stored `flightId`.
+  `PaymentRepository`: CRUD plus flightId + seatNumber payment lookup.
+  Models map Booking, Passenger, Payment and SeatInventory to database tables;
+  DTOs provide booking result/request/response representations.
+
+Security and configuration
+--------------------------
+Booking's `SecurityConfig` currently allows all listed reservation, booking,
+seat, payment and confirmation endpoints anonymously. The JWT filter is still
+installed for other endpoints and propagates role authentication. Its central
+properties set port 8182, MySQL/JPA, Eureka and
+`arfoms.flight-service.base-url=http://flight-service`; the inspected Feign
+client uses its service name directly instead of this property.
+
+8. END-TO-END WORKFLOWS
+-----------------------
+
+A. Service startup and discovery
+  1. Config Server starts on 8888 and serves native classpath properties.
+  2. Discovery Server imports its properties and opens Eureka on 8761.
+  3. Auth, Flight, Booking and Gateway import their named property file.
+  4. Eureka clients register their service name/localhost instance.
+  5. Feign can resolve `flight-service`; the Gateway uses its configured routes.
+
+B. Login and authenticated request
+  1. Frontend POSTs credentials to Gateway `/api/auth/login`.
+  2. Gateway forwards this to Auth Service port 8180.
+  3. Auth looks up the username in MySQL and compares password text.
+  4. Auth returns JWT with username subject and role claim.
+  5. Frontend sends `Authorization: Bearer <token>` on protected requests.
+  6. Each business service's filter parses the same signed token and places the
+     username/role in its own Spring Security context.
+
+C. Flight administration
+  1. An authenticated client creates a flight with POST `/api/flights`.
+  2. Flight Service validates route/time/fare/duplicate constraints.
+  3. It saves the Flight in MySQL, computes distance and generates AVAILABLE
+     SeatInventory records from the configured row/column layout.
+  4. Public consumers can query/search the resulting flight and availability.
+
+D. Reservation search, booking and seat payment
+  1. Frontend calls Gateway `/flights/search` or `/api/flights/search`.
+  2. Gateway routes `/flights/**` to Booking, while `/api/flights/**` goes
+     directly to Flight Service. Booking's search calls Flight with Feign.
+  3. Booking filters results and overlays seat availability from its own seat
+     inventory queries.
+  4. Frontend submits passenger draft/details to Booking endpoints.
+  5. Booking validates the flight through Feign and checks that no passenger is
+     already active on that same flight.
+  6. Seat page calls `/airline/api/seats`; Booking retrieves seat rows and
+     Flight data and returns display fields.
+  7. Payment confirmation calls `/booking/confirm`; Booking atomically changes
+     AVAILABLE to BOOKED, creates a mock payment/PNR record and returns details.
+  8. Cancellation marks the booking CANCELLED and attempts to release its seat.
+
+9. IMPLEMENTATION OBSERVATIONS / LIMITATIONS
+--------------------------------------------
+
+  * Gateway routes are currently hard-coded localhost URLs, so Gateway routing
+    will not load-balance instances even though services use Eureka elsewhere.
+  * Booking and Flight each have SeatInventory access/models; this creates two
+    ownership views of seat state. Flight creates its inventory locally, while
+    Booking queries/updates its own mapped seat table. Shared MySQL schema makes
+    this work only when mappings/table design match; in a stricter microservice
+    architecture, one service should own seat mutations through an API/event.
+  * JWT secret has an in-code default shared across services. For production,
+    supply a secret through secure external configuration and rotate it.
+  * Auth uses plain-text password comparison/storage. Replace with BCrypt or
+    another password encoder before using this outside development.
+  * Booking's public security rules expose booking/seat/payment routes without
+    authentication in the current code. Tighten authorization by role for a
+    production deployment.
+  * MockPaymentService never charges a payment method; it only creates a random
+    PNR and CONFIRMED result for demonstration/development.
+  * Database credentials are included in central configuration. Externalize them
+    to environment variables, secrets manager or deployment-specific config.
+
+10. QUICK PORT AND RESPONSIBILITY REFERENCE
+-------------------------------------------
+
+  8888  config-server      Shared native/classpath configuration provider
+  8761  discovery-server   Eureka registry
+  8210  api-gateway        Frontend ingress, routing and gateway CORS
+  8180  auth-service       Users, login, registration and JWT generation
+  8181  flight-service     Flight schedules, fares, airport metadata, inventory
+  8182  booking-service    Search, bookings, passengers, seats and mock payment
+
+END OF GUIDE
